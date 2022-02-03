@@ -12,7 +12,7 @@ Dynamically manage pools of asyncio tasks
 
 ## Dependencies
 
-Python Version ..., OS ...
+Python Version 3.8+, tested on Linux
 
 ## Building from source
 
