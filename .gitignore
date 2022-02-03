@@ -1,0 +1,10 @@
+# Python virtual environment:
+/.venv/
+# IDE settings:
+/.idea/
+/.vscode/
+# Distribution / packaging:
+*.egg-info/
+/dist/
+# Python cache:
+__pycache__/
