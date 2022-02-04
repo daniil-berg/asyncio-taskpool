@@ -56,7 +56,7 @@ async def main() -> None:
     # Finally we allow for all tasks to do do their cleanup, if they need to do any, upon being cancelled.
     # We block until they all return or raise an exception, but since we are not interested in any of their exceptions,
     # we just silently collect their exceptions along with their return values.
-    await pool.gather(return_exceptions=True)
+    await pool.close(return_exceptions=True)
     await control_server_task
 
 

@@ -71,7 +71,7 @@ class TaskPool:
     def stop_all(self) -> int:
         return self.stop(self.size)
 
-    async def gather(self, return_exceptions: bool = False):
+    async def close(self, return_exceptions: bool = False):
         results = await gather(*self._tasks, *self._cancelled, return_exceptions=return_exceptions)
         self._tasks = self._cancelled = []
         return results
