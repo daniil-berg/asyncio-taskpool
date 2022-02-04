@@ -70,6 +70,10 @@ class ControlServer(ABC):
         log.debug("%s requests pool size", self.client_class.__name__)
         writer.write(f'{self._pool.size}'.encode())
 
+    def _pool_func(self, writer: StreamWriter) -> None:
+        log.debug("%s requests pool function", self.client_class.__name__)
+        writer.write(self._pool.func_name.encode())
+
     async def _listen(self, reader: StreamReader, writer: StreamWriter) -> None:
         while self._server.is_serving():
             msg = (await reader.read(constants.MSG_BYTES)).decode().strip()
@@ -85,6 +89,8 @@ class ControlServer(ABC):
                 self._stop_all_tasks(writer)
             elif cmd == constants.CMD_SIZE:
                 self._pool_size(writer)
+            elif cmd == constants.CMD_FUNC:
+                self._pool_func(writer)
             else:
                 log.debug("%s sent invalid command: %s", self.client_class.__name__, msg)
                 writer.write(b"Invalid command!")

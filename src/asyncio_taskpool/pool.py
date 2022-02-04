@@ -11,8 +11,16 @@ log = logging.getLogger(__name__)
 
 
 class TaskPool:
+    _pools: List['TaskPool'] = []
+
+    @classmethod
+    def _add_pool(cls, pool: 'TaskPool') -> int:
+        cls._pools.append(pool)
+        return len(cls._pools) - 1
+
     def __init__(self, func: CoroutineFunc, args: Iterable[Any] = (), kwargs: Mapping[str, Any] = None,
-                 final_callback: FinalCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
+                 final_callback: FinalCallbackT = None, cancel_callback: CancelCallbackT = None,
+                 name: str = None) -> None:
         self._func: CoroutineFunc = func
         self._args: Iterable[Any] = args
         self._kwargs: Mapping[str, Any] = kwargs if kwargs is not None else {}
@@ -20,6 +28,9 @@ class TaskPool:
         self._cancel_callback: CancelCallbackT = cancel_callback
         self._tasks: List[Task] = []
         self._cancelled: List[Task] = []
+        self._idx: int = self._add_pool(self)
+        self._name: str = name
+        log.debug("%s initialized", repr(self))
 
     @property
     def func_name(self) -> str:
@@ -29,8 +40,11 @@ class TaskPool:
     def size(self) -> int:
         return len(self._tasks)
 
+    def __str__(self) -> str:
+        return f'{self.__class__.__name__}-{self._name or self._idx}'
+
     def __repr__(self) -> str:
-        return f'<{self.__class__.__name__} func={self.func_name} size={self.size}>'
+        return f'<{self} func={self.func_name}>'
 
     def _task_name(self, i: int) -> str:
         return f'{self.func_name}_pool_task_{i}'
