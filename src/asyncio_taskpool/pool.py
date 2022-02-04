@@ -19,6 +19,7 @@ class TaskPool:
         self._final_callback: FinalCallbackT = final_callback
         self._cancel_callback: CancelCallbackT = cancel_callback
         self._tasks: List[Task] = []
+        self._cancelled: List[Task] = []
 
     @property
     def func_name(self) -> str:
@@ -43,11 +44,20 @@ class TaskPool:
             self._start_one()
 
     def stop(self, num: int = 1) -> int:
-        if num < 1:
-            return 0
-        return sum(task.cancel() for task in reversed(self._tasks[-num:]))
+        for i in range(num):
+            try:
+                task = self._tasks.pop()
+            except IndexError:
+                num = i
+                break
+            task.cancel()
+            self._cancelled.append(task)
+        return num
+
+    def stop_all(self) -> int:
+        return self.stop(self.size)
 
     async def gather(self, return_exceptions: bool = False):
-        results = await gather(*self._tasks, return_exceptions=return_exceptions)
-        self._tasks = []
+        results = await gather(*self._tasks, *self._cancelled, return_exceptions=return_exceptions)
+        self._tasks = self._cancelled = []
         return results
