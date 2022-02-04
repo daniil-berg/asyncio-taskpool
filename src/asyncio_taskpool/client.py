@@ -22,14 +22,21 @@ class ControlClient(ABC):
             msg = input("> ").strip().lower()
         except EOFError:
             msg = constants.CLIENT_EXIT
+        except KeyboardInterrupt:
+            print()
+            return
         if msg == constants.CLIENT_EXIT:
             writer.close()
             self._connected = False
             return
-        writer.write(msg.encode())
-        await writer.drain()
-        print("Command sent; awaiting response...")
-        print("Server response:", (await reader.read(constants.MSG_BYTES)).decode())
+        try:
+            writer.write(msg.encode())
+            await writer.drain()
+        except ConnectionError as e:
+            self._connected = False
+            print(e, file=sys.stderr)
+            return
+        print((await reader.read(constants.MSG_BYTES)).decode())
 
     async def start(self):
         reader, writer = await self.open_connection(**self._conn_kwargs)
