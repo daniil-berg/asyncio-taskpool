@@ -22,21 +22,32 @@ class BaseTaskPool:
         cls._pools.append(pool)
         return len(cls._pools) - 1
 
-    def __init__(self, max_size: int = inf, name: str = None) -> None:
-        self._max_size: int = max_size   # TODO: Make use of a synchronization primitive for this to work
+    # TODO: Make use of `max_running`
+    def __init__(self, max_running: int = inf, name: str = None) -> None:
+        self._max_running: int = max_running
         self._open: bool = True
         self._counter: int = 0
         self._running: Dict[int, Task] = {}
         self._cancelled: Dict[int, Task] = {}
         self._ended: Dict[int, Task] = {}
-        self._all_tasks_known: Event = Event()
-        self._all_tasks_known.set()
         self._idx: int = self._add_pool(self)
         self._name: str = name
+        self._all_tasks_known_flag: Event = Event()
+        self._all_tasks_known_flag.set()
+        self._more_allowed_flag: Event = Event()
+        self._check_more_allowed()
         log.debug("%s initialized", str(self))
 
     def __str__(self) -> str:
         return f'{self.__class__.__name__}-{self._name or self._idx}'
+
+    @property
+    def max_running(self) -> int:
+        return self._max_running
+
+    @property
+    def is_open(self) -> bool:
+        return self._open
 
     @property
     def num_running(self) -> int:
@@ -53,6 +64,16 @@ class BaseTaskPool:
     @property
     def num_finished(self) -> int:
         return self.num_ended - self.num_cancelled
+
+    @property
+    def is_full(self) -> bool:
+        return not self._more_allowed_flag.is_set()
+
+    def _check_more_allowed(self) -> None:
+        if self.is_full and self.num_running < self.max_running:
+            self._more_allowed_flag.set()
+        elif not self.is_full and self.num_running >= self.max_running:
+            self._more_allowed_flag.clear()
 
     def _task_name(self, task_id: int) -> str:
         return f'{self}_Task-{task_id}'
@@ -71,6 +92,7 @@ class BaseTaskPool:
             task = self._cancelled[task_id]
         self._ended[task_id] = task
         await _execute_function(custom_callback, args=(task_id, ))
+        self._check_more_allowed()
         log.info("Ended %s", self._task_name(task_id))
 
     async def _task_wrapper(self, awaitable: Awaitable, task_id: int, final_callback: FinalCallbackT = None,
@@ -93,6 +115,7 @@ class BaseTaskPool:
             self._task_wrapper(awaitable, task_id, final_callback, cancel_callback),
             name=self._task_name(task_id)
         )
+        self._check_more_allowed()
         return task_id
 
     def _cancel_one(self, task_id: int, msg: str = None) -> None:
@@ -121,7 +144,7 @@ class BaseTaskPool:
     async def gather(self, return_exceptions: bool = False):
         if self._open:
             raise exceptions.PoolStillOpen("Pool must be closed, before tasks can be gathered")
-        await self._all_tasks_known.wait()
+        await self._all_tasks_known_flag.wait()
         results = await gather(*self._running.values(), *self._ended.values(), return_exceptions=return_exceptions)
         self._running = self._cancelled = self._ended = {}
         return results
@@ -155,14 +178,14 @@ class TaskPool(BaseTaskPool):
     def _map(self, func: CoroutineFunc, args_iter: ArgsT, arg_stars: int = 0, num_tasks: int = 1,
              final_callback: FinalCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
 
-        if self._all_tasks_known.is_set():
-            self._all_tasks_known.clear()
+        if self._all_tasks_known_flag.is_set():
+            self._all_tasks_known_flag.clear()
         args_iter = iter(args_iter)
 
         def _start_next_coroutine() -> bool:
             cor = self._get_next_coroutine(func, args_iter, arg_stars)
             if cor is None:
-                self._all_tasks_known.set()
+                self._all_tasks_known_flag.set()
                 return True
             self._start_task(cor, ignore_closed=True, final_callback=_start_next, cancel_callback=cancel_callback)
             return False
