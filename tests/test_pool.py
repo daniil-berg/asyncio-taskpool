@@ -41,12 +41,14 @@ class BaseTaskPoolTestCase(TestCase):
 
     def test_init(self):
         self.assertEqual(self.test_pool_size, self.task_pool.pool_size)
-        self.assertEqual(self.test_pool_name, self.task_pool._name)
+        self.assertTrue(self.task_pool._open)
+        self.assertEqual(0, self.task_pool._counter)
         self.assertDictEqual(EMPTY_DICT, self.task_pool._running)
         self.assertDictEqual(EMPTY_DICT, self.task_pool._cancelled)
         self.assertEqual(0, self.task_pool._ending)
         self.assertDictEqual(EMPTY_DICT, self.task_pool._ended)
         self.assertEqual(self.mock_idx, self.task_pool._idx)
+        self.assertEqual(self.test_pool_name, self.task_pool._name)
         self.assertIsInstance(self.task_pool._all_tasks_known_flag, asyncio.locks.Event)
         self.assertTrue(self.task_pool._all_tasks_known_flag.is_set())
         self.assertIsInstance(self.task_pool._more_allowed_flag, asyncio.locks.Event)
