@@ -23,8 +23,8 @@ class BaseTaskPoolTestCase(TestCase):
         self.mock___str__.return_value = self.mock_str = 'foobar'
 
         # Test pool parameters:
-        self.mock_pool_params = {'max_running': 420, 'name': 'test123'}
-        self.task_pool = pool.BaseTaskPool(**self.mock_pool_params)
+        self.test_pool_size, self.test_pool_name = 420, 'test123'
+        self.task_pool = pool.BaseTaskPool(pool_size=self.test_pool_size, name=self.test_pool_name)
 
     def tearDown(self) -> None:
         setattr(pool.TaskPool, '_pools', self._pools)
@@ -40,10 +40,11 @@ class BaseTaskPoolTestCase(TestCase):
         self.assertListEqual([self.task_pool], getattr(pool.TaskPool, '_pools'))
 
     def test_init(self):
-        for key, value in self.mock_pool_params.items():
-            self.assertEqual(value, getattr(self.task_pool, f'_{key}'))
+        self.assertEqual(self.test_pool_size, self.task_pool.pool_size)
+        self.assertEqual(self.test_pool_name, self.task_pool._name)
         self.assertDictEqual(EMPTY_DICT, self.task_pool._running)
         self.assertDictEqual(EMPTY_DICT, self.task_pool._cancelled)
+        self.assertEqual(0, self.task_pool._ending)
         self.assertDictEqual(EMPTY_DICT, self.task_pool._ended)
         self.assertEqual(self.mock_idx, self.task_pool._idx)
         self.assertIsInstance(self.task_pool._all_tasks_known_flag, asyncio.locks.Event)
@@ -55,15 +56,11 @@ class BaseTaskPoolTestCase(TestCase):
 
     def test___str__(self):
         self.__str___patcher.stop()
-        expected_str = f'{pool.BaseTaskPool.__name__}-{self.mock_pool_params["name"]}'
+        expected_str = f'{pool.BaseTaskPool.__name__}-{self.test_pool_name}'
         self.assertEqual(expected_str, str(self.task_pool))
         setattr(self.task_pool, '_name', None)
         expected_str = f'{pool.BaseTaskPool.__name__}-{self.task_pool._idx}'
         self.assertEqual(expected_str, str(self.task_pool))
-
-    def test_max_running(self):
-        self.task_pool._max_running = foo = 'foo'
-        self.assertEqual(foo, self.task_pool.max_running)
 
     def test_is_open(self):
         self.task_pool._open = foo = 'foo'
@@ -86,31 +83,30 @@ class BaseTaskPoolTestCase(TestCase):
     def test_num_finished(self, mock_num_cancelled: MagicMock, mock_num_ended: MagicMock):
         mock_num_cancelled.return_value = cancelled = 69
         mock_num_ended.return_value = ended = 420
-        self.assertEqual(ended - cancelled, self.task_pool.num_finished)
+        self.task_pool._ending = mock_ending = 2
+        self.assertEqual(ended - cancelled + mock_ending, self.task_pool.num_finished)
+        mock_num_cancelled.assert_called_once_with()
+        mock_num_ended.assert_called_once_with()
 
     def test_is_full(self):
         self.assertEqual(not self.task_pool._more_allowed_flag.is_set(), self.task_pool.is_full)
 
-    @patch.object(pool.BaseTaskPool, 'max_running', new_callable=PropertyMock)
     @patch.object(pool.BaseTaskPool, 'num_running', new_callable=PropertyMock)
     @patch.object(pool.BaseTaskPool, 'is_full', new_callable=PropertyMock)
-    def test__check_more_allowed(self, mock_is_full: MagicMock, mock_num_running: MagicMock,
-                                 mock_max_running: MagicMock):
+    def test__check_more_allowed(self, mock_is_full: MagicMock, mock_num_running: MagicMock):
         def reset_mocks():
             mock_is_full.reset_mock()
             mock_num_running.reset_mock()
-            mock_max_running.reset_mock()
         self._check_more_allowed_patcher.stop()
 
         # Just reaching limit, we expect flag to become unset:
         mock_is_full.return_value = False
-        mock_num_running.return_value = mock_max_running.return_value = 420
+        mock_num_running.return_value = 420
         self.task_pool._more_allowed_flag.clear()
         self.task_pool._check_more_allowed()
         self.assertFalse(self.task_pool._more_allowed_flag.is_set())
         mock_is_full.assert_has_calls([call(), call()])
         mock_num_running.assert_called_once_with()
-        mock_max_running.assert_called_once_with()
         reset_mocks()
 
         # Already at limit, we expect nothing to change:
@@ -119,7 +115,6 @@ class BaseTaskPoolTestCase(TestCase):
         self.assertFalse(self.task_pool._more_allowed_flag.is_set())
         mock_is_full.assert_has_calls([call(), call()])
         mock_num_running.assert_called_once_with()
-        mock_max_running.assert_called_once_with()
         reset_mocks()
 
         # Just finished a task, we expect flag to become set:
@@ -128,7 +123,6 @@ class BaseTaskPoolTestCase(TestCase):
         self.assertTrue(self.task_pool._more_allowed_flag.is_set())
         mock_is_full.assert_called_once_with()
         mock_num_running.assert_called_once_with()
-        mock_max_running.assert_called_once_with()
         reset_mocks()
 
         # In this state we expect the flag to remain unchanged change:
@@ -137,7 +131,6 @@ class BaseTaskPoolTestCase(TestCase):
         self.assertTrue(self.task_pool._more_allowed_flag.is_set())
         mock_is_full.assert_has_calls([call(), call()])
         mock_num_running.assert_called_once_with()
-        mock_max_running.assert_called_once_with()
 
     def test__task_name(self):
         i = 123

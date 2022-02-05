@@ -15,20 +15,23 @@ log = logging.getLogger(__name__)
 
 
 class BaseTaskPool:
+    """The base class for task pools. Not intended to be used directly."""
     _pools: List['BaseTaskPool'] = []
 
     @classmethod
     def _add_pool(cls, pool: 'BaseTaskPool') -> int:
+        """Adds a `pool` (instance of any subclass) to the general list of pools and returns it's index in the list."""
         cls._pools.append(pool)
         return len(cls._pools) - 1
 
-    # TODO: Make use of `max_running`
-    def __init__(self, max_running: int = inf, name: str = None) -> None:
-        self._max_running: int = max_running
+    def __init__(self, pool_size: int = inf, name: str = None) -> None:
+        """Initializes the necessary internal attributes and adds the new pool to the general pools list."""
+        self.pool_size: int = pool_size
         self._open: bool = True
         self._counter: int = 0
         self._running: Dict[int, Task] = {}
         self._cancelled: Dict[int, Task] = {}
+        self._ending: int = 0
         self._ended: Dict[int, Task] = {}
         self._idx: int = self._add_pool(self)
         self._name: str = name
@@ -42,40 +45,63 @@ class BaseTaskPool:
         return f'{self.__class__.__name__}-{self._name or self._idx}'
 
     @property
-    def max_running(self) -> int:
-        return self._max_running
-
-    @property
     def is_open(self) -> bool:
+        """Returns `True` if more the pool has not been closed yet."""
         return self._open
 
     @property
     def num_running(self) -> int:
+        """
+        Returns the number of tasks in the pool that are (at that moment) still running.
+        At the moment a task's final callback function is fired, it is no longer considered to be running.
+        """
         return len(self._running)
 
     @property
     def num_cancelled(self) -> int:
+        """
+        Returns the number of tasks in the pool that have been cancelled through the pool (up until that moment).
+        At the moment a task's cancel callback function is fired, it is considered cancelled and no longer running.
+        """
         return len(self._cancelled)
 
     @property
     def num_ended(self) -> int:
+        """
+        Returns the number of tasks started through the pool that have stopped running (up until that moment).
+        At the moment a task's final callback function is fired, it is considered ended.
+        When a task is cancelled, it is not immediately considered ended; only after its cancel callback function has
+        returned, does it then actually end.
+        """
         return len(self._ended)
 
     @property
     def num_finished(self) -> int:
-        return self.num_ended - self.num_cancelled
+        """
+        Returns the number of tasks in the pool that have actually finished running (without having been cancelled).
+        """
+        return self.num_ended - self.num_cancelled + self._ending
 
     @property
     def is_full(self) -> bool:
+        """
+        Returns `False` only if (at that moment) the number of running tasks is below the pool's specified size.
+        When the pool is full, any call to start a new task within it will block.
+        """
         return not self._more_allowed_flag.is_set()
 
     def _check_more_allowed(self) -> None:
-        if self.is_full and self.num_running < self.max_running:
+        """
+        Sets or clears the internal event flag signalling whether or not the pool is full (i.e. whether more tasks can
+        be started), if the current state of the pool demands it.
+        """
+        if self.is_full and self.num_running < self.pool_size:
             self._more_allowed_flag.set()
-        elif not self.is_full and self.num_running >= self.max_running:
+        elif not self.is_full and self.num_running >= self.pool_size:
             self._more_allowed_flag.clear()
 
     def _task_name(self, task_id: int) -> str:
+        """Returns a standardized name for a task with a specific `task_id`."""
         return f'{self}_Task-{task_id}'
 
     async def _cancel_task(self, task_id: int, custom_callback: CancelCallbackT = None) -> None:
@@ -83,6 +109,7 @@ class BaseTaskPool:
         task = self._running.pop(task_id)
         assert task is not None
         self._cancelled[task_id] = task
+        self._ending += 1
         await _execute_function(custom_callback, args=(task_id, ))
         log.debug("Cancelled %s", self._task_name(task_id))
 
@@ -90,6 +117,7 @@ class BaseTaskPool:
         task = self._running.pop(task_id, None)
         if task is None:
             task = self._cancelled[task_id]
+            self._ending -= 1
         self._ended[task_id] = task
         await _execute_function(custom_callback, args=(task_id, ))
         self._check_more_allowed()
@@ -107,8 +135,9 @@ class BaseTaskPool:
 
     def _start_task(self, awaitable: Awaitable, ignore_closed: bool = False, final_callback: FinalCallbackT = None,
                     cancel_callback: CancelCallbackT = None) -> int:
-        if not (self._open or ignore_closed):
+        if not (self.is_open or ignore_closed):
             raise exceptions.PoolIsClosed("Cannot start new tasks")
+        # TODO: Implement this (and the dependent user-facing methods) as async to wait for room in the pool
         task_id = self._counter
         self._counter += 1
         self._running[task_id] = create_task(
