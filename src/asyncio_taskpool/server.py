@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Tuple, Union, Optional
 
 from . import constants
-from .pool import TaskPool
+from .pool import SimpleTaskPool
 from .client import ControlClient, UnixControlClient
 
 
@@ -29,7 +29,7 @@ def get_cmd_arg(msg: str) -> Union[Tuple[str, Optional[int]], Tuple[None, None]]
     return cmd[0], None
 
 
-class ControlServer(ABC):
+class ControlServer(ABC):  # TODO: Implement interface for normal TaskPool instances, not just SimpleTaskPool
     client_class = ControlClient
 
     @abstractmethod
@@ -40,8 +40,8 @@ class ControlServer(ABC):
     def final_callback(self) -> None:
         raise NotImplementedError
 
-    def __init__(self, pool: TaskPool, **server_kwargs) -> None:
-        self._pool: TaskPool = pool
+    def __init__(self, pool: SimpleTaskPool, **server_kwargs) -> None:
+        self._pool: SimpleTaskPool = pool
         self._server_kwargs = server_kwargs
         self._server: Optional[AbstractServer] = None
 
@@ -49,26 +49,22 @@ class ControlServer(ABC):
         if num is None:
             num = 1
         log.debug("%s requests starting %s %s", self.client_class.__name__, num, tasks_str(num))
-        self._pool.start(num)
-        size = self._pool.size
-        writer.write(f"{num} new {tasks_str(num)} started! {size} {tasks_str(size)} active now.".encode())
+        writer.write(str(self._pool.start(num)).encode())
 
     def _stop_tasks(self, writer: StreamWriter, num: int = None) -> None:
         if num is None:
             num = 1
         log.debug("%s requests stopping %s %s", self.client_class.__name__, num, tasks_str(num))
-        num = self._pool.stop(num)  # the requested number may be greater than the total number of running tasks
-        size = self._pool.size
-        writer.write(f"{num} {tasks_str(num)} stopped! {size} {tasks_str(size)} left.".encode())
+        # the requested number may be greater than the total number of running tasks
+        writer.write(str(self._pool.stop(num)).encode())
 
     def _stop_all_tasks(self, writer: StreamWriter) -> None:
         log.debug("%s requests stopping all tasks", self.client_class.__name__)
-        num = self._pool.stop_all()
-        writer.write(f"Remaining {num} {tasks_str(num)} stopped!".encode())
+        writer.write(str(self._pool.stop_all()).encode())
 
     def _pool_size(self, writer: StreamWriter) -> None:
         log.debug("%s requests pool size", self.client_class.__name__)
-        writer.write(f'{self._pool.size}'.encode())
+        writer.write(str(self._pool.size).encode())
 
     def _pool_func(self, writer: StreamWriter) -> None:
         log.debug("%s requests pool function", self.client_class.__name__)
@@ -98,7 +94,7 @@ class ControlServer(ABC):
 
     async def _client_connected_cb(self, reader: StreamReader, writer: StreamWriter) -> None:
         log.debug("%s connected", self.client_class.__name__)
-        writer.write(f"{self.__class__.__name__} for {self._pool}".encode())
+        writer.write(str(self._pool).encode())
         await writer.drain()
         await self._listen(reader, writer)
 
@@ -120,7 +116,7 @@ class ControlServer(ABC):
 class UnixControlServer(ControlServer):
     client_class = UnixControlClient
 
-    def __init__(self, pool: TaskPool, **server_kwargs) -> None:
+    def __init__(self, pool: SimpleTaskPool, **server_kwargs) -> None:
         self._socket_path = Path(server_kwargs.pop('path'))
         super().__init__(pool, **server_kwargs)
 

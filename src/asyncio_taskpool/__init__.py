@@ -1,2 +1,2 @@
-from .pool import TaskPool
+from .pool import TaskPool, SimpleTaskPool
 from .server import UnixControlServer

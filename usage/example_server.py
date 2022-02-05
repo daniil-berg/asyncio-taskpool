@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from asyncio_taskpool import TaskPool, UnixControlServer
+from asyncio_taskpool import SimpleTaskPool, UnixControlServer
 from asyncio_taskpool.constants import PACKAGE_NAME
 
 
@@ -43,7 +43,7 @@ async def main() -> None:
     # We just put some integers into our queue, since all our workers actually do, is print an item and sleep for a bit.
     for item in range(100):
         q.put_nowait(item)
-    pool = TaskPool(worker, (q,))  # initializes the pool
+    pool = SimpleTaskPool(worker, (q,))  # initializes the pool
     pool.start(3)  # launches three worker tasks
     control_server_task = await UnixControlServer(pool, path='/tmp/py_asyncio_taskpool.sock').serve_forever()
     # We block until `.task_done()` has been called once by our workers for every item placed into the queue.
@@ -53,10 +53,11 @@ async def main() -> None:
     # Since our workers should now be stuck waiting for more items to pick from the queue, but no items are left,
     # we can now safely cancel their tasks.
     pool.stop_all()
+    pool.close()
     # Finally we allow for all tasks to do do their cleanup, if they need to do any, upon being cancelled.
     # We block until they all return or raise an exception, but since we are not interested in any of their exceptions,
     # we just silently collect their exceptions along with their return values.
-    await pool.close(return_exceptions=True)
+    await pool.gather(return_exceptions=True)
     await control_server_task
 
 

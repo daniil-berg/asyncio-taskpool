@@ -1,8 +1,8 @@
 # Using `asyncio-taskpool`
 
-## Simple example
+## Minimal example for `SimpleTaskPool`
 
-The minimum required setup is a "worker" coroutine function that can do something asynchronously, a main coroutine function that sets up the `TaskPool` and starts/stops the tasks as desired, eventually awaiting them all. 
+The minimum required setup is a "worker" coroutine function that can do something asynchronously, a main coroutine function that sets up the `SimpleTaskPool` and starts/stops the tasks as desired, eventually awaiting them all. 
 
 The following demo code enables full log output first for additional clarity. It is complete and should work as is.
 
@@ -11,7 +11,7 @@ The following demo code enables full log output first for additional clarity. It
 import logging
 import asyncio
 
-from asyncio_taskpool.pool import TaskPool
+from asyncio_taskpool.pool import SimpleTaskPool
 
 
 logging.getLogger().setLevel(logging.NOTSET)
@@ -32,13 +32,14 @@ async def work(n: int) -> None:
 
 
 async def main() -> None:
-    pool = TaskPool(work, (5,))  # initializes the pool; no work is being done yet
+    pool = SimpleTaskPool(work, (5,))  # initializes the pool; no work is being done yet
     pool.start(3)  # launches work tasks 0, 1, and 2
     await asyncio.sleep(1.5)  # lets the tasks work for a bit
     pool.start()  # launches work task 3
     await asyncio.sleep(1.5)  # lets the tasks work for a bit
     pool.stop(2)  # cancels tasks 3 and 2
-    await pool.close()  # awaits all tasks, then flushes the pool
+    pool.close()  # required for the last line
+    await pool.gather()  # awaits all tasks, then flushes the pool
 
 
 if __name__ == '__main__':
@@ -46,31 +47,32 @@ if __name__ == '__main__':
 ```
 
 ### Output 
-Additional comments indicated with `<--`
 ```
-Started work_pool_task_0
-Started work_pool_task_1
-Started work_pool_task_2
+SimpleTaskPool-0 initialized
+Started SimpleTaskPool-0_Task-0
+Started SimpleTaskPool-0_Task-1
+Started SimpleTaskPool-0_Task-2
 did 0
 did 0
 did 0
-Started work_pool_task_3
+Started SimpleTaskPool-0_Task-3
 did 1
 did 1
 did 1
-did 0    <-- notice that the newly created task begins counting at 0 
+did 0
+SimpleTaskPool-0 is closed!
+Cancelling SimpleTaskPool-0_Task-3 ...
+Cancelled SimpleTaskPool-0_Task-3
+Ended SimpleTaskPool-0_Task-3
+Cancelling SimpleTaskPool-0_Task-2 ...
+Cancelled SimpleTaskPool-0_Task-2
+Ended SimpleTaskPool-0_Task-2
 did 2
-did 2    <-- two taks were stopped; only tasks 0 and 1 continue "working"
-Cancelling work_pool_task_2 ...
-Cancelled work_pool_task_2
-Exiting work_pool_task_2
-Cancelling work_pool_task_3 ...
-Cancelled work_pool_task_3
-Exiting work_pool_task_3
+did 2
 did 3
 did 3
-Exiting work_pool_task_0
-Exiting work_pool_task_1
+Ended SimpleTaskPool-0_Task-0
+Ended SimpleTaskPool-0_Task-1
 did 4
 did 4
 ```

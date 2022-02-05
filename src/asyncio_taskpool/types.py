@@ -1,7 +1,9 @@
 from asyncio.streams import StreamReader, StreamWriter
-from typing import Tuple, Callable, Awaitable, Union, Any
+from typing import Any, Awaitable, Callable, Iterable, Mapping, Tuple, Union
 
 
+ArgsT = Iterable[Any]
+KwArgsT = Mapping[str, Any]
 CoroutineFunc = Callable[[...], Awaitable[Any]]
 FinalCallbackT = Callable
 CancelCallbackT = Callable
