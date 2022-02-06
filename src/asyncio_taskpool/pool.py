@@ -106,20 +106,18 @@ class BaseTaskPool:
         """Returns a standardized name for a task with a specific `task_id`."""
         return f'{self}_Task-{task_id}'
 
-    async def _cancel_task(self, task_id: int, custom_callback: CancelCallbackT = None) -> None:
+    async def _task_cancellation(self, task_id: int, custom_callback: CancelCallbackT = None) -> None:
         log.debug("Cancelling %s ...", self._task_name(task_id))
-        task = self._running.pop(task_id)
-        assert task is not None
-        self._cancelled[task_id] = task
+        self._cancelled[task_id] = self._running.pop(task_id)
         self._num_cancelled += 1
         log.debug("Cancelled %s", self._task_name(task_id))
         await _execute_function(custom_callback, args=(task_id, ))
 
-    async def _end_task(self, task_id: int, custom_callback: EndCallbackT = None) -> None:
-        task = self._running.pop(task_id, None)
-        if task is None:
-            task = self._cancelled.pop(task_id)
-        self._ended[task_id] = task
+    async def _task_ending(self, task_id: int, custom_callback: EndCallbackT = None) -> None:
+        try:
+            self._ended[task_id] = self._running.pop(task_id)
+        except KeyError:
+            self._ended[task_id] = self._cancelled.pop(task_id)
         self._num_ended += 1
         self._enough_room.release()
         log.info("Ended %s", self._task_name(task_id))
@@ -131,9 +129,9 @@ class BaseTaskPool:
         try:
             return await awaitable
         except CancelledError:
-            await self._cancel_task(task_id, custom_callback=cancel_callback)
+            await self._task_cancellation(task_id, custom_callback=cancel_callback)
         finally:
-            await self._end_task(task_id, custom_callback=end_callback)
+            await self._task_ending(task_id, custom_callback=end_callback)
 
     async def _start_task(self, awaitable: Awaitable, ignore_closed: bool = False, end_callback: EndCallbackT = None,
                           cancel_callback: CancelCallbackT = None) -> int:
