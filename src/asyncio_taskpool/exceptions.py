@@ -14,7 +14,7 @@ class AlreadyCancelled(TaskEnded):
     pass
 
 
-class AlreadyFinished(TaskEnded):
+class AlreadyEnded(TaskEnded):
     pass
 
 
