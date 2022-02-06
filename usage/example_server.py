@@ -44,7 +44,7 @@ async def main() -> None:
     for item in range(100):
         q.put_nowait(item)
     pool = SimpleTaskPool(worker, (q,))  # initializes the pool
-    pool.start(3)  # launches three worker tasks
+    await pool.start(3)  # launches three worker tasks
     control_server_task = await UnixControlServer(pool, path='/tmp/py_asyncio_taskpool.sock').serve_forever()
     # We block until `.task_done()` has been called once by our workers for every item placed into the queue.
     await q.join()

@@ -45,11 +45,11 @@ class ControlServer(ABC):  # TODO: Implement interface for normal TaskPool insta
         self._server_kwargs = server_kwargs
         self._server: Optional[AbstractServer] = None
 
-    def _start_tasks(self, writer: StreamWriter, num: int = None) -> None:
+    async def _start_tasks(self, writer: StreamWriter, num: int = None) -> None:
         if num is None:
             num = 1
         log.debug("%s requests starting %s %s", self.client_class.__name__, num, tasks_str(num))
-        writer.write(str(self._pool.start(num)).encode())
+        writer.write(str(await self._pool.start(num)).encode())
 
     def _stop_tasks(self, writer: StreamWriter, num: int = None) -> None:
         if num is None:
@@ -78,7 +78,7 @@ class ControlServer(ABC):  # TODO: Implement interface for normal TaskPool insta
                 break
             cmd, arg = get_cmd_arg(msg)
             if cmd == constants.CMD_START:
-                self._start_tasks(writer, arg)
+                await self._start_tasks(writer, arg)
             elif cmd == constants.CMD_STOP:
                 self._stop_tasks(writer, arg)
             elif cmd == constants.CMD_STOP_ALL:

@@ -2,13 +2,13 @@ import logging
 from asyncio import gather
 from asyncio.coroutines import iscoroutinefunction
 from asyncio.exceptions import CancelledError
-from asyncio.locks import Event
+from asyncio.locks import Event, Semaphore
 from asyncio.tasks import Task, create_task
 from math import inf
 from typing import Any, Awaitable, Callable, Dict, Iterable, Iterator, List, Optional, Tuple
 
 from . import exceptions
-from .types import ArgsT, KwArgsT, CoroutineFunc, FinalCallbackT, CancelCallbackT
+from .types import ArgsT, KwArgsT, CoroutineFunc, EndCallbackT, CancelCallbackT
 
 
 log = logging.getLogger(__name__)
@@ -26,7 +26,8 @@ class BaseTaskPool:
 
     def __init__(self, pool_size: int = inf, name: str = None) -> None:
         """Initializes the necessary internal attributes and adds the new pool to the general pools list."""
-        self.pool_size: int = pool_size
+        self._enough_room: Semaphore = Semaphore()
+        self.pool_size = pool_size
         self._open: bool = True
         self._counter: int = 0
         self._running: Dict[int, Task] = {}
@@ -37,12 +38,21 @@ class BaseTaskPool:
         self._name: str = name
         self._all_tasks_known_flag: Event = Event()
         self._all_tasks_known_flag.set()
-        self._more_allowed_flag: Event = Event()
-        self._check_more_allowed()
         log.debug("%s initialized", str(self))
 
     def __str__(self) -> str:
         return f'{self.__class__.__name__}-{self._name or self._idx}'
+
+    @property
+    def pool_size(self) -> int:
+        return self._pool_size
+
+    @pool_size.setter
+    def pool_size(self, value: int) -> None:
+        if value < 0:
+            raise ValueError("Pool size can not be less than 0")
+        self._enough_room._value = value
+        self._pool_size = value
 
     @property
     def is_open(self) -> bool:
@@ -53,7 +63,7 @@ class BaseTaskPool:
     def num_running(self) -> int:
         """
         Returns the number of tasks in the pool that are (at that moment) still running.
-        At the moment a task's final callback function is fired, it is no longer considered to be running.
+        At the moment a task's `end_callback` is fired, it is no longer considered to be running.
         """
         return len(self._running)
 
@@ -61,7 +71,7 @@ class BaseTaskPool:
     def num_cancelled(self) -> int:
         """
         Returns the number of tasks in the pool that have been cancelled through the pool (up until that moment).
-        At the moment a task's cancel callback function is fired, it is considered cancelled and no longer running.
+        At the moment a task's `cancel_callback` is fired, it is considered cancelled and no longer running.
         """
         return len(self._cancelled)
 
@@ -69,9 +79,9 @@ class BaseTaskPool:
     def num_ended(self) -> int:
         """
         Returns the number of tasks started through the pool that have stopped running (up until that moment).
-        At the moment a task's final callback function is fired, it is considered ended.
-        When a task is cancelled, it is not immediately considered ended; only after its cancel callback function has
-        returned, does it then actually end.
+        At the moment a task's `end_callback` is fired, it is considered ended.
+        When a task is cancelled, it is not immediately considered ended; only after its `cancel_callback` has returned,
+        does it then actually end.
         """
         return len(self._ended)
 
@@ -88,18 +98,9 @@ class BaseTaskPool:
         Returns `False` only if (at that moment) the number of running tasks is below the pool's specified size.
         When the pool is full, any call to start a new task within it will block.
         """
-        return not self._more_allowed_flag.is_set()
+        return self._enough_room.locked()
 
-    def _check_more_allowed(self) -> None:
-        """
-        Sets or clears the internal event flag signalling whether or not the pool is full (i.e. whether more tasks can
-        be started), if the current state of the pool demands it.
-        """
-        if self.is_full and self.num_running < self.pool_size:
-            self._more_allowed_flag.set()
-        elif not self.is_full and self.num_running >= self.pool_size:
-            self._more_allowed_flag.clear()
-
+    # TODO: Consider adding task group names
     def _task_name(self, task_id: int) -> str:
         """Returns a standardized name for a task with a specific `task_id`."""
         return f'{self}_Task-{task_id}'
@@ -110,20 +111,20 @@ class BaseTaskPool:
         assert task is not None
         self._cancelled[task_id] = task
         self._ending += 1
-        await _execute_function(custom_callback, args=(task_id, ))
         log.debug("Cancelled %s", self._task_name(task_id))
+        await _execute_function(custom_callback, args=(task_id, ))
 
-    async def _end_task(self, task_id: int, custom_callback: FinalCallbackT = None) -> None:
+    async def _end_task(self, task_id: int, custom_callback: EndCallbackT = None) -> None:
         task = self._running.pop(task_id, None)
         if task is None:
             task = self._cancelled[task_id]
             self._ending -= 1
         self._ended[task_id] = task
-        await _execute_function(custom_callback, args=(task_id, ))
-        self._check_more_allowed()
+        self._enough_room.release()
         log.info("Ended %s", self._task_name(task_id))
+        await _execute_function(custom_callback, args=(task_id, ))
 
-    async def _task_wrapper(self, awaitable: Awaitable, task_id: int, final_callback: FinalCallbackT = None,
+    async def _task_wrapper(self, awaitable: Awaitable, task_id: int, end_callback: EndCallbackT = None,
                             cancel_callback: CancelCallbackT = None) -> Any:
         log.info("Started %s", self._task_name(task_id))
         try:
@@ -131,20 +132,23 @@ class BaseTaskPool:
         except CancelledError:
             await self._cancel_task(task_id, custom_callback=cancel_callback)
         finally:
-            await self._end_task(task_id, custom_callback=final_callback)
+            await self._end_task(task_id, custom_callback=end_callback)
 
-    def _start_task(self, awaitable: Awaitable, ignore_closed: bool = False, final_callback: FinalCallbackT = None,
-                    cancel_callback: CancelCallbackT = None) -> int:
+    async def _start_task(self, awaitable: Awaitable, ignore_closed: bool = False, end_callback: EndCallbackT = None,
+                          cancel_callback: CancelCallbackT = None) -> int:
         if not (self.is_open or ignore_closed):
             raise exceptions.PoolIsClosed("Cannot start new tasks")
-        # TODO: Implement this (and the dependent user-facing methods) as async to wait for room in the pool
-        task_id = self._counter
-        self._counter += 1
-        self._running[task_id] = create_task(
-            self._task_wrapper(awaitable, task_id, final_callback, cancel_callback),
-            name=self._task_name(task_id)
-        )
-        self._check_more_allowed()
+        await self._enough_room.acquire()
+        try:
+            task_id = self._counter
+            self._counter += 1
+            self._running[task_id] = create_task(
+                self._task_wrapper(awaitable, task_id, end_callback, cancel_callback),
+                name=self._task_name(task_id)
+            )
+        except Exception as e:
+            self._enough_room.release()
+            raise e
         return task_id
 
     def _cancel_one(self, task_id: int, msg: str = None) -> None:
@@ -180,15 +184,15 @@ class BaseTaskPool:
 
 
 class TaskPool(BaseTaskPool):
-    def _apply_one(self, func: CoroutineFunc, args: ArgsT = (), kwargs: KwArgsT = None,
-                   final_callback: FinalCallbackT = None, cancel_callback: CancelCallbackT = None) -> int:
+    async def _apply_one(self, func: CoroutineFunc, args: ArgsT = (), kwargs: KwArgsT = None,
+                         end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> int:
         if kwargs is None:
             kwargs = {}
-        return self._start_task(func(*args, **kwargs), final_callback=final_callback, cancel_callback=cancel_callback)
+        return await self._start_task(func(*args, **kwargs), end_callback=end_callback, cancel_callback=cancel_callback)
 
-    def apply(self, func: CoroutineFunc, args: ArgsT = (), kwargs: KwArgsT = None, num: int = 1,
-              final_callback: FinalCallbackT = None, cancel_callback: CancelCallbackT = None) -> Tuple[int]:
-        return tuple(self._apply_one(func, args, kwargs, final_callback, cancel_callback) for _ in range(num))
+    async def apply(self, func: CoroutineFunc, args: ArgsT = (), kwargs: KwArgsT = None, num: int = 1,
+                    end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> Tuple[int]:
+        return tuple(await self._apply_one(func, args, kwargs, end_callback, cancel_callback) for _ in range(num))
 
     @staticmethod
     def _get_next_coroutine(func: CoroutineFunc, args_iter: Iterator[Any], arg_stars: int = 0) -> Optional[Awaitable]:
@@ -204,54 +208,54 @@ class TaskPool(BaseTaskPool):
             return func(**arg)
         raise ValueError
 
-    def _map(self, func: CoroutineFunc, args_iter: ArgsT, arg_stars: int = 0, num_tasks: int = 1,
-             final_callback: FinalCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
+    async def _map(self, func: CoroutineFunc, args_iter: ArgsT, arg_stars: int = 0, num_tasks: int = 1,
+                   end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
 
         if self._all_tasks_known_flag.is_set():
             self._all_tasks_known_flag.clear()
         args_iter = iter(args_iter)
 
-        def _start_next_coroutine() -> bool:
+        async def _start_next_coroutine() -> bool:
             cor = self._get_next_coroutine(func, args_iter, arg_stars)
             if cor is None:
                 self._all_tasks_known_flag.set()
                 return True
-            self._start_task(cor, ignore_closed=True, final_callback=_start_next, cancel_callback=cancel_callback)
+            await self._start_task(cor, ignore_closed=True, end_callback=_start_next, cancel_callback=cancel_callback)
             return False
 
         async def _start_next(task_id: int) -> None:
-            await _execute_function(final_callback, args=(task_id, ))
-            _start_next_coroutine()
+            await _start_next_coroutine()
+            await _execute_function(end_callback, args=(task_id, ))
 
         for _ in range(num_tasks):
-            reached_end = _start_next_coroutine()
+            reached_end = await _start_next_coroutine()
             if reached_end:
                 break
 
-    def map(self, func: CoroutineFunc, args_iter: ArgsT, num_tasks: int = 1,
-            final_callback: FinalCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
-        self._map(func, args_iter, arg_stars=0, num_tasks=num_tasks,
-                  final_callback=final_callback, cancel_callback=cancel_callback)
+    async def map(self, func: CoroutineFunc, args_iter: ArgsT, num_tasks: int = 1,
+                  end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
+        await self._map(func, args_iter, arg_stars=0, num_tasks=num_tasks,
+                        end_callback=end_callback, cancel_callback=cancel_callback)
 
-    def starmap(self, func: CoroutineFunc, args_iter: Iterable[ArgsT], num_tasks: int = 1,
-                final_callback: FinalCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
-        self._map(func, args_iter, arg_stars=1, num_tasks=num_tasks,
-                  final_callback=final_callback, cancel_callback=cancel_callback)
+    async def starmap(self, func: CoroutineFunc, args_iter: Iterable[ArgsT], num_tasks: int = 1,
+                      end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
+        await self._map(func, args_iter, arg_stars=1, num_tasks=num_tasks,
+                        end_callback=end_callback, cancel_callback=cancel_callback)
 
-    def doublestarmap(self, func: CoroutineFunc, kwargs_iter: Iterable[KwArgsT], num_tasks: int = 1,
-                      final_callback: FinalCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
-        self._map(func, kwargs_iter, arg_stars=2, num_tasks=num_tasks,
-                  final_callback=final_callback, cancel_callback=cancel_callback)
+    async def doublestarmap(self, func: CoroutineFunc, kwargs_iter: Iterable[KwArgsT], num_tasks: int = 1,
+                            end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
+        await self._map(func, kwargs_iter, arg_stars=2, num_tasks=num_tasks,
+                        end_callback=end_callback, cancel_callback=cancel_callback)
 
 
 class SimpleTaskPool(BaseTaskPool):
     def __init__(self, func: CoroutineFunc, args: ArgsT = (), kwargs: KwArgsT = None,
-                 final_callback: FinalCallbackT = None, cancel_callback: CancelCallbackT = None,
+                 end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None,
                  name: str = None) -> None:
         self._func: CoroutineFunc = func
         self._args: ArgsT = args
         self._kwargs: KwArgsT = kwargs if kwargs is not None else {}
-        self._final_callback: FinalCallbackT = final_callback
+        self._end_callback: EndCallbackT = end_callback
         self._cancel_callback: CancelCallbackT = cancel_callback
         super().__init__(name=name)
 
@@ -263,12 +267,12 @@ class SimpleTaskPool(BaseTaskPool):
     def size(self) -> int:
         return self.num_running
 
-    def _start_one(self) -> int:
-        return self._start_task(self._func(*self._args, **self._kwargs),
-                                final_callback=self._final_callback, cancel_callback=self._cancel_callback)
+    async def _start_one(self) -> int:
+        return await self._start_task(self._func(*self._args, **self._kwargs),
+                                      end_callback=self._end_callback, cancel_callback=self._cancel_callback)
 
-    def start(self, num: int = 1) -> List[int]:
-        return [self._start_one() for _ in range(num)]
+    async def start(self, num: int = 1) -> List[int]:
+        return [await self._start_one() for _ in range(num)]
 
     def stop(self, num: int = 1) -> List[int]:
         num = min(num, self.size)
