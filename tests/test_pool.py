@@ -52,6 +52,8 @@ class BaseTaskPoolTestCase(TestCase):
         self.assertEqual(self.test_pool_name, self.task_pool._name)
         self.assertIsInstance(self.task_pool._all_tasks_known_flag, asyncio.locks.Event)
         self.assertTrue(self.task_pool._all_tasks_known_flag.is_set())
+        self.assertIsInstance(self.task_pool._interrupt_flag, asyncio.locks.Event)
+        self.assertFalse(self.task_pool._interrupt_flag.is_set())
         self.mock__add_pool.assert_called_once_with(self.task_pool)
         self.mock_pool_size.assert_called_once_with(self.test_pool_size)
         self.mock___str__.assert_called_once_with()
