@@ -1,6 +1,6 @@
 import asyncio
 from unittest import TestCase
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import PropertyMock, patch
 
 from asyncio_taskpool import pool
 
@@ -45,8 +45,9 @@ class BaseTaskPoolTestCase(TestCase):
         self.assertEqual(0, self.task_pool._counter)
         self.assertDictEqual(EMPTY_DICT, self.task_pool._running)
         self.assertDictEqual(EMPTY_DICT, self.task_pool._cancelled)
-        self.assertEqual(0, self.task_pool._ending)
         self.assertDictEqual(EMPTY_DICT, self.task_pool._ended)
+        self.assertEqual(0, self.task_pool._num_cancelled)
+        self.assertEqual(0, self.task_pool._num_ended)
         self.assertEqual(self.mock_idx, self.task_pool._idx)
         self.assertEqual(self.test_pool_name, self.task_pool._name)
         self.assertIsInstance(self.task_pool._all_tasks_known_flag, asyncio.locks.Event)
@@ -83,22 +84,18 @@ class BaseTaskPoolTestCase(TestCase):
         self.assertEqual(3, self.task_pool.num_running)
 
     def test_num_cancelled(self):
-        self.task_pool._cancelled = ['foo', 'bar', 'baz']
+        self.task_pool._num_cancelled = 33
         self.assertEqual(3, self.task_pool.num_cancelled)
 
     def test_num_ended(self):
-        self.task_pool._ended = ['foo', 'bar', 'baz']
+        self.task_pool._num_ended = 3
         self.assertEqual(3, self.task_pool.num_ended)
 
-    @patch.object(pool.BaseTaskPool, 'num_ended', new_callable=PropertyMock)
-    @patch.object(pool.BaseTaskPool, 'num_cancelled', new_callable=PropertyMock)
-    def test_num_finished(self, mock_num_cancelled: MagicMock, mock_num_ended: MagicMock):
-        mock_num_cancelled.return_value = cancelled = 69
-        mock_num_ended.return_value = ended = 420
-        self.task_pool._ending = mock_ending = 2
-        self.assertEqual(ended - cancelled + mock_ending, self.task_pool.num_finished)
-        mock_num_cancelled.assert_called_once_with()
-        mock_num_ended.assert_called_once_with()
+    def test_num_finished(self):
+        self.task_pool._num_cancelled = cancelled = 69
+        self.task_pool._num_ended = ended = 420
+        self.task_pool._cancelled = mock_cancelled_dict = {1: 'foo', 2: 'bar'}
+        self.assertEqual(ended - cancelled + len(mock_cancelled_dict), self.task_pool.num_finished)
 
     def test_is_full(self):
         self.assertEqual(self.task_pool._enough_room.locked(), self.task_pool.is_full)

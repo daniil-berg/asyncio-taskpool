@@ -32,8 +32,9 @@ class BaseTaskPool:
         self._counter: int = 0
         self._running: Dict[int, Task] = {}
         self._cancelled: Dict[int, Task] = {}
-        self._ending: int = 0
         self._ended: Dict[int, Task] = {}
+        self._num_cancelled: int = 0
+        self._num_ended: int = 0
         self._idx: int = self._add_pool(self)
         self._name: str = name
         self._all_tasks_known_flag: Event = Event()
@@ -73,7 +74,7 @@ class BaseTaskPool:
         Returns the number of tasks in the pool that have been cancelled through the pool (up until that moment).
         At the moment a task's `cancel_callback` is fired, it is considered cancelled and no longer running.
         """
-        return len(self._cancelled)
+        return self._num_cancelled
 
     @property
     def num_ended(self) -> int:
@@ -83,14 +84,14 @@ class BaseTaskPool:
         When a task is cancelled, it is not immediately considered ended; only after its `cancel_callback` has returned,
         does it then actually end.
         """
-        return len(self._ended)
+        return self._num_ended
 
     @property
     def num_finished(self) -> int:
         """
         Returns the number of tasks in the pool that have actually finished running (without having been cancelled).
         """
-        return self.num_ended - self.num_cancelled + self._ending
+        return self._num_ended - self._num_cancelled + len(self._cancelled)
 
     @property
     def is_full(self) -> bool:
@@ -110,16 +111,16 @@ class BaseTaskPool:
         task = self._running.pop(task_id)
         assert task is not None
         self._cancelled[task_id] = task
-        self._ending += 1
+        self._num_cancelled += 1
         log.debug("Cancelled %s", self._task_name(task_id))
         await _execute_function(custom_callback, args=(task_id, ))
 
     async def _end_task(self, task_id: int, custom_callback: EndCallbackT = None) -> None:
         task = self._running.pop(task_id, None)
         if task is None:
-            task = self._cancelled[task_id]
-            self._ending -= 1
+            task = self._cancelled.pop(task_id)
         self._ended[task_id] = task
+        self._num_ended += 1
         self._enough_room.release()
         log.info("Ended %s", self._task_name(task_id))
         await _execute_function(custom_callback, args=(task_id, ))
@@ -170,6 +171,11 @@ class BaseTaskPool:
         for task in self._running.values():
             task.cancel(msg=msg)
 
+    async def flush(self, return_exceptions: bool = False):
+        results = await gather(*self._ended.values(), *self._cancelled.values(), return_exceptions=return_exceptions)
+        self._ended = self._cancelled = {}
+        return results
+
     def close(self) -> None:
         self._open = False
         log.info("%s is closed!", str(self))
@@ -178,8 +184,9 @@ class BaseTaskPool:
         if self._open:
             raise exceptions.PoolStillOpen("Pool must be closed, before tasks can be gathered")
         await self._all_tasks_known_flag.wait()
-        results = await gather(*self._running.values(), *self._ended.values(), return_exceptions=return_exceptions)
-        self._running = self._cancelled = self._ended = {}
+        results = await gather(*self._ended.values(), *self._cancelled.values(), *self._running.values(),
+                               return_exceptions=return_exceptions)
+        self._ended = self._cancelled = self._running = {}
         return results
 
 
