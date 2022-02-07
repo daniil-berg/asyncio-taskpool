@@ -210,9 +210,9 @@ class BaseTaskPool:
         if not (self.is_open or ignore_closed):
             raise exceptions.PoolIsClosed("Cannot start new tasks")
         await self._enough_room.acquire()
+        task_id = self._counter
+        self._counter += 1
         try:
-            task_id = self._counter
-            self._counter += 1
             self._running[task_id] = create_task(
                 self._task_wrapper(awaitable, task_id, end_callback, cancel_callback),
                 name=self._task_name(task_id)
@@ -242,16 +242,6 @@ class BaseTaskPool:
             if self._ended.get(task_id):
                 raise exceptions.AlreadyEnded(f"{self._task_name(task_id)} has finished running")
             raise exceptions.InvalidTaskID(f"No task with ID {task_id} found in {self}")
-
-    def _cancel_task(self, task_id: int, msg: str = None) -> None:
-        """
-        Cancels the running task with the specified ID.
-
-        Args:
-            task_id: The ID of a task running within the pool that should be cancelled.
-            msg (optional): Passed to the `Task.cancel()` method.
-        """
-        self._get_running_task(task_id).cancel(msg=msg)
 
     def cancel(self, *task_ids: int, msg: str = None) -> None:
         """
@@ -303,7 +293,8 @@ class BaseTaskPool:
         """
         results = await gather(*self._ended.values(), *self._cancelled.values(), return_exceptions=return_exceptions)
         self._ended = self._cancelled = {}
-        self._interrupt_flag.clear()
+        if self._interrupt_flag.is_set():
+            self._interrupt_flag.clear()
         return results
 
     def close(self) -> None:
@@ -338,7 +329,8 @@ class BaseTaskPool:
         results = await gather(*self._ended.values(), *self._cancelled.values(), *self._running.values(),
                                return_exceptions=return_exceptions)
         self._ended = self._cancelled = self._running = {}
-        self._interrupt_flag.clear()
+        if self._interrupt_flag.is_set():
+            self._interrupt_flag.clear()
         return results
 
 

@@ -8,3 +8,5 @@
 /dist/
 # Python cache:
 __pycache__/
+# Testing:
+.coverage
