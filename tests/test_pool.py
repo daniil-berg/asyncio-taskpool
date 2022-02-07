@@ -67,8 +67,7 @@ class BaseTaskPoolTestCase(IsolatedAsyncioTestCase):
         self.assertEqual(0, self.task_pool._num_ended)
         self.assertEqual(self.mock_idx, self.task_pool._idx)
         self.assertEqual(self.test_pool_name, self.task_pool._name)
-        self.assertIsInstance(self.task_pool._all_tasks_known_flag, asyncio.locks.Event)
-        self.assertTrue(self.task_pool._all_tasks_known_flag.is_set())
+        self.assertListEqual(self.task_pool._before_gathering, EMPTY_LIST)
         self.assertIsInstance(self.task_pool._interrupt_flag, asyncio.locks.Event)
         self.assertFalse(self.task_pool._interrupt_flag.is_set())
         self.mock__add_pool.assert_called_once_with(self.task_pool)
@@ -342,11 +341,11 @@ class BaseTaskPoolTestCase(IsolatedAsyncioTestCase):
         self.assertFalse(self.task_pool._open)
 
     async def test_gather(self):
-        mock_wait = AsyncMock()
-        self.task_pool._all_tasks_known_flag = MagicMock(wait=mock_wait)
         test_exception = TestException()
         mock_ended_func, mock_cancelled_func = AsyncMock(return_value=FOO), AsyncMock(side_effect=test_exception)
         mock_running_func = AsyncMock(return_value=BAR)
+        mock_queue_join = AsyncMock()
+        self.task_pool._before_gathering = before_gather = [mock_queue_join()]
         self.task_pool._ended = ended = {123: mock_ended_func()}
         self.task_pool._cancelled = cancelled = {456: mock_cancelled_func()}
         self.task_pool._running = running = {789: mock_running_func()}
@@ -358,25 +357,23 @@ class BaseTaskPoolTestCase(IsolatedAsyncioTestCase):
         self.assertDictEqual(self.task_pool._ended, ended)
         self.assertDictEqual(self.task_pool._cancelled, cancelled)
         self.assertDictEqual(self.task_pool._running, running)
+        self.assertListEqual(self.task_pool._before_gathering, before_gather)
         self.assertTrue(self.task_pool._interrupt_flag.is_set())
-        mock_wait.assert_not_awaited()
 
         self.task_pool._open = False
 
-        def check_assertions() -> None:
+        def check_assertions(output) -> None:
             self.assertListEqual([FOO, test_exception, BAR], output)
             self.assertDictEqual(self.task_pool._ended, EMPTY_DICT)
             self.assertDictEqual(self.task_pool._cancelled, EMPTY_DICT)
             self.assertDictEqual(self.task_pool._running, EMPTY_DICT)
+            self.assertListEqual(self.task_pool._before_gathering, EMPTY_LIST)
             self.assertFalse(self.task_pool._interrupt_flag.is_set())
-            mock_wait.assert_awaited_once_with()
 
-        output = await self.task_pool.gather(return_exceptions=True)
-        check_assertions()
-        mock_wait.reset_mock()
+        check_assertions(await self.task_pool.gather(return_exceptions=True))
 
+        self.task_pool._before_gathering = [mock_queue_join()]
         self.task_pool._ended = {123: mock_ended_func()}
         self.task_pool._cancelled = {456: mock_cancelled_func()}
         self.task_pool._running = {789: mock_running_func()}
-        output = await self.task_pool.gather(return_exceptions=True)
-        check_assertions()
+        check_assertions(await self.task_pool.gather(return_exceptions=True))

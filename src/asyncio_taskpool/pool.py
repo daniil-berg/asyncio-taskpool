@@ -297,7 +297,8 @@ class BaseTaskPool:
             return_exceptions (optional): Passed directly into `gather`.
         """
         results = await gather(*self._ended.values(), *self._cancelled.values(), return_exceptions=return_exceptions)
-        self._ended = self._cancelled = {}
+        self._ended.clear()
+        self._cancelled.clear()
         if self._interrupt_flag.is_set():
             self._interrupt_flag.clear()
         return results
@@ -333,7 +334,10 @@ class BaseTaskPool:
         await gather(*self._before_gathering)
         results = await gather(*self._ended.values(), *self._cancelled.values(), *self._running.values(),
                                return_exceptions=return_exceptions)
-        self._ended = self._cancelled = self._running = {}
+        self._ended.clear()
+        self._cancelled.clear()
+        self._running.clear()
+        self._before_gathering.clear()
         if self._interrupt_flag.is_set():
             self._interrupt_flag.clear()
         return results
@@ -498,6 +502,8 @@ class TaskPool(BaseTaskPool):
                    end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
         """
         Creates coroutines with arguments from a supplied iterable and runs them as new tasks in the pool in batches.
+        TODO: If task groups are implemented, consider adding all tasks from one call of this method to the same group
+              and referring to "group size" rather than chunk/batch size.
         Each coroutine looks like `func(arg)`, `func(*arg)`, or `func(**arg)`, `arg` being an element from the iterable.
 
         This method blocks, **only if** there is not enough room in the pool for the first batch of new tasks.
