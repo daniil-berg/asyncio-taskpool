@@ -201,12 +201,13 @@ class BaseTaskPool:
                 If `True`, even if the pool is closed, the task will still be started.
             end_callback (optional):
                 A callback to execute after the task has ended.
-                It is run with the `task_id` as its only positional argument.
+                It is run with the task's ID as its only positional argument.
             cancel_callback (optional):
                 A callback to execute after cancellation of the task.
-                It is run with the `task_id` as its only positional argument.
+                It is run with the task's ID as its only positional argument.
 
         Raises:
+            `asyncio_taskpool.exceptions.NotCoroutine` if `awaitable` is not a coroutine.
             `asyncio_taskpool.exceptions.PoolIsClosed` if the pool has been closed and `ignore_closed` is `False`.
         """
         if not iscoroutine(awaitable):
@@ -339,14 +340,79 @@ class BaseTaskPool:
 
 
 class TaskPool(BaseTaskPool):
+    """
+    General task pool class.
+    Attempts to somewhat emulate part of the interface of `multiprocessing.pool.Pool` from the stdlib.
+
+    A `TaskPool` instance can manage an arbitrary number of concurrent tasks from any coroutine function.
+    Tasks in the pool can all belong to the same coroutine function,
+    but they can also come from any number of different and unrelated coroutine functions.
+
+    As long as there is room in the pool, more tasks can be added. (By default, there is no pool size limit.)
+    Each task started in the pool receives a unique ID, which can be used to cancel specific tasks at any moment.
+
+    Adding tasks blocks **only if** the pool is full at that moment.
+    """
+
     async def _apply_one(self, func: CoroutineFunc, args: ArgsT = (), kwargs: KwArgsT = None,
                          end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> int:
+        """
+        Creates a coroutine with the supplied arguments and runs it as a new task in the pool.
+
+        This method blocks, **only if** the pool is full.
+
+        Args:
+            func:
+                The coroutine function to be run as a task within the task pool.
+            args (optional):
+                The positional arguments to pass into the function call.
+            kwargs (optional):
+                The keyword-arguments to pass into the function call.
+            end_callback (optional):
+                A callback to execute after the task has ended.
+                It is run with the task's ID as its only positional argument.
+            cancel_callback (optional):
+                A callback to execute after cancellation of the task.
+                It is run with the task's ID as its only positional argument.
+
+        Returns:
+            The newly spawned task's ID within the pool.
+        """
         if kwargs is None:
             kwargs = {}
         return await self._start_task(func(*args, **kwargs), end_callback=end_callback, cancel_callback=cancel_callback)
 
     async def apply(self, func: CoroutineFunc, args: ArgsT = (), kwargs: KwArgsT = None, num: int = 1,
                     end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> List[int]:
+        """
+        Creates an arbitrary number of coroutines with the supplied arguments and runs them as new tasks in the pool.
+        Each coroutine looks like `func(*args, **kwargs)`.
+
+        This method blocks, **only if** there is not enough room in the pool for the desired number of new tasks.
+
+        Args:
+            func:
+                The coroutine function to use for spawning the new tasks within the task pool.
+            args (optional):
+                The positional arguments to pass into each function call.
+            kwargs (optional):
+                The keyword-arguments to pass into each function call.
+            num (optional):
+                The number of tasks to spawn with the specified parameters.
+            end_callback (optional):
+                A callback to execute after a task has ended.
+                It is run with the task's ID as its only positional argument.
+            cancel_callback (optional):
+                A callback to execute after cancellation of a task.
+                It is run with the task's ID as its only positional argument.
+
+        Returns:
+            The newly spawned tasks' IDs within the pool as a list of integers.
+
+        Raises:
+            `NotCoroutine` if `func` is not a coroutine function.
+            `PoolIsClosed` if the pool has been closed already.
+        """
         ids = await gather(*(self._apply_one(func, args, kwargs, end_callback, cancel_callback) for _ in range(num)))
         # TODO: for some reason PyCharm wrongly claims that `gather` returns a tuple of exceptions
         assert isinstance(ids, list)
@@ -354,6 +420,27 @@ class TaskPool(BaseTaskPool):
 
     async def _next_callback(self, task_id: int, func: CoroutineFunc, args_iter: Iterator[Any], arg_stars: int = 0,
                              end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
+        """
+        Wrapper around an end callback function passed into the `_map()` method.
+        To be used in conjunction with `_start_next_task()` to simulate a queue of coroutines to be started as tasks
+        in the pool, whenever the `_map()` method is called.
+
+        Args:
+            task_id:
+                The ID of the ending task.
+            func:
+                The coroutine function to use for spawning the tasks within the task pool.
+            args_iter:
+                The iterator of arguments; each element is to be passed into a `func` call when spawning a new task.
+            arg_stars (optional):
+                Whether or not to unpack an element from `args_iter` using stars; must be 0, 1, or 2.
+            end_callback (optional):
+                The actual callback specified to execute after the task (and the next one) has ended.
+                It is run with the `task_id` as its only positional argument.
+            cancel_callback (optional):
+                The callback that was specified to execute after cancellation of the task (and the next one).
+                It is run with the `task_id` as its only positional argument.
+        """
         reached_end = await self._start_next_task(func, args_iter, arg_stars=arg_stars,
                                                   end_callback=end_callback, cancel_callback=cancel_callback)
         if reached_end:
@@ -362,6 +449,27 @@ class TaskPool(BaseTaskPool):
 
     async def _start_next_task(self, func: CoroutineFunc, args_iter: Iterator[Any], arg_stars: int = 0,
                                end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> bool:
+        """
+        Starts a new task in the pool using the next element from the arguments iterator.
+        Helper used in conjunction with the `_next_callback()` wrapper in the `_map()` method.
+
+        Args:
+            func:
+                The coroutine function to use for spawning the tasks within the task pool.
+            args_iter:
+                The iterator of arguments; each element is to be passed into a `func` call when spawning a new task.
+            arg_stars (optional):
+                Whether or not to unpack an element from `args_iter` using stars; must be 0, 1, or 2.
+            end_callback (optional):
+                The callback specified to execute after a task (and the next one) has ended.
+                It is run with the Task's ID as its only positional argument.
+            cancel_callback (optional):
+                The callback that was specified to execute after cancellation of the task (and the next one).
+                It is run with the Task's ID as its only positional argument.
+
+        Returns:
+            `True` if the end of `args_iter` has been reached or the `_interrupt_flag` has been set; `False` otherwise.
+        """
         if self._interrupt_flag.is_set():
             return True
         try:
@@ -378,6 +486,37 @@ class TaskPool(BaseTaskPool):
 
     async def _map(self, func: CoroutineFunc, args_iter: ArgsT, arg_stars: int = 0, num_tasks: int = 1,
                    end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
+        """
+        Creates coroutines with arguments from a supplied iterable and runs them as new tasks in the pool in chunks.
+        Each coroutine looks like `func(arg)`, `func(*arg)`, or `func(**arg)`, `arg` being an element from the iterable.
+
+        This method blocks, **only if** there is not enough room in the pool for the first chunk of new tasks.
+
+        It clears the internal `_all_tasks_known_flag` until the end of the iterable of arguments has been reached,
+        then sets it.
+        TODO: This is wrong because it may interfere with another call to this method.
+              Consider rebuilding this entire method using a `asyncio.Queue` instead of convoluted callbacks.
+              Then instead of the `_all_tasks_known_flag` the pool's `gather` can wait on the Queue's `join`...
+
+        Args:
+            func:
+                The coroutine function to use for spawning the new tasks within the task pool.
+            args_iter:
+                The iterable of arguments; each element is to be passed into a `func` call when spawning a new task.
+            arg_stars (optional):
+                Whether or not to unpack an element from `args_iter` using stars; must be 0, 1, or 2.
+            num_tasks (optional):
+                The maximum number of the new tasks to run concurrently.
+            end_callback (optional):
+                A callback to execute after a task has ended.
+                It is run with the task's ID as its only positional argument.
+            cancel_callback (optional):
+                A callback to execute after cancellation of a task.
+                It is run with the task's ID as its only positional argument.
+
+        Raises:
+            `asyncio_taskpool.exceptions.PoolIsClosed` if the pool has been closed.
+        """
         if not self.is_open:
             raise exceptions.PoolIsClosed("Cannot start new tasks")
         if self._all_tasks_known_flag.is_set():
