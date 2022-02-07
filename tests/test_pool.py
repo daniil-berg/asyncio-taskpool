@@ -123,9 +123,9 @@ class BaseTaskPoolTestCase(IsolatedAsyncioTestCase):
         i = 123
         self.assertEqual(f'{self.mock_str}_Task-{i}', self.task_pool._task_name(i))
 
-    @patch.object(pool, '_execute_function')
+    @patch.object(pool, 'execute_optional')
     @patch.object(pool.BaseTaskPool, '_task_name', return_value=FOO)
-    async def test__task_cancellation(self, mock__task_name: MagicMock, mock__execute_function: AsyncMock):
+    async def test__task_cancellation(self, mock__task_name: MagicMock, mock_execute_optional: AsyncMock):
         task_id, mock_task, mock_callback = 1, MagicMock(), MagicMock()
         self.task_pool._num_cancelled = cancelled = 3
         self.task_pool._running[task_id] = mock_task
@@ -134,11 +134,11 @@ class BaseTaskPoolTestCase(IsolatedAsyncioTestCase):
         self.assertEqual(mock_task, self.task_pool._cancelled[task_id])
         self.assertEqual(cancelled + 1, self.task_pool._num_cancelled)
         mock__task_name.assert_called_with(task_id)
-        mock__execute_function.assert_awaited_once_with(mock_callback, args=(task_id, ))
+        mock_execute_optional.assert_awaited_once_with(mock_callback, args=(task_id, ))
 
-    @patch.object(pool, '_execute_function')
+    @patch.object(pool, 'execute_optional')
     @patch.object(pool.BaseTaskPool, '_task_name', return_value=FOO)
-    async def test__task_ending(self, mock__task_name: MagicMock, mock__execute_function: AsyncMock):
+    async def test__task_ending(self, mock__task_name: MagicMock, mock_execute_optional: AsyncMock):
         task_id, mock_task, mock_callback = 1, MagicMock(), MagicMock()
         self.task_pool._num_ended = ended = 3
         self.task_pool._enough_room._value = room = 123
@@ -151,9 +151,9 @@ class BaseTaskPoolTestCase(IsolatedAsyncioTestCase):
         self.assertEqual(ended + 1, self.task_pool._num_ended)
         self.assertEqual(room + 1, self.task_pool._enough_room._value)
         mock__task_name.assert_called_with(task_id)
-        mock__execute_function.assert_awaited_once_with(mock_callback, args=(task_id, ))
+        mock_execute_optional.assert_awaited_once_with(mock_callback, args=(task_id, ))
         mock__task_name.reset_mock()
-        mock__execute_function.reset_mock()
+        mock_execute_optional.reset_mock()
 
         # End cancelled task:
         self.task_pool._cancelled[task_id] = self.task_pool._ended.pop(task_id)
@@ -163,7 +163,7 @@ class BaseTaskPoolTestCase(IsolatedAsyncioTestCase):
         self.assertEqual(ended + 2, self.task_pool._num_ended)
         self.assertEqual(room + 2, self.task_pool._enough_room._value)
         mock__task_name.assert_called_with(task_id)
-        mock__execute_function.assert_awaited_once_with(mock_callback, args=(task_id, ))
+        mock_execute_optional.assert_awaited_once_with(mock_callback, args=(task_id, ))
 
     @patch.object(pool.BaseTaskPool, '_task_ending')
     @patch.object(pool.BaseTaskPool, '_task_cancellation')
@@ -213,14 +213,27 @@ class BaseTaskPoolTestCase(IsolatedAsyncioTestCase):
 
         mock_create_task.return_value = mock_task = MagicMock()
         mock__task_wrapper.return_value = mock_wrapped = MagicMock()
-        mock_awaitable, mock_cancel_cb, mock_end_cb = MagicMock(), MagicMock(), MagicMock()
+        mock_coroutine, mock_cancel_cb, mock_end_cb = AsyncMock(), MagicMock(), MagicMock()
         self.task_pool._counter = count = 123
         self.task_pool._enough_room._value = room = 123
 
+        with self.assertRaises(exceptions.NotCoroutine):
+            await self.task_pool._start_task(MagicMock(), end_callback=mock_end_cb, cancel_callback=mock_cancel_cb)
+        self.assertEqual(count, self.task_pool._counter)
+        self.assertNotIn(count, self.task_pool._running)
+        self.assertEqual(room, self.task_pool._enough_room._value)
+        mock_is_open.assert_not_called()
+        mock__task_name.assert_not_called()
+        mock__task_wrapper.assert_not_called()
+        mock_create_task.assert_not_called()
+        reset_mocks()
+
         mock_is_open.return_value = ignore_closed = False
+        mock_awaitable = mock_coroutine()
         with self.assertRaises(exceptions.PoolIsClosed):
             await self.task_pool._start_task(mock_awaitable, ignore_closed,
                                              end_callback=mock_end_cb, cancel_callback=mock_cancel_cb)
+        await mock_awaitable
         self.assertEqual(count, self.task_pool._counter)
         self.assertNotIn(count, self.task_pool._running)
         self.assertEqual(room, self.task_pool._enough_room._value)
@@ -231,8 +244,10 @@ class BaseTaskPoolTestCase(IsolatedAsyncioTestCase):
         reset_mocks()
 
         ignore_closed = True
+        mock_awaitable = mock_coroutine()
         output = await self.task_pool._start_task(mock_awaitable, ignore_closed,
                                                   end_callback=mock_end_cb, cancel_callback=mock_cancel_cb)
+        await mock_awaitable
         self.assertEqual(count, output)
         self.assertEqual(count + 1, self.task_pool._counter)
         self.assertEqual(mock_task, self.task_pool._running[count])
@@ -246,11 +261,13 @@ class BaseTaskPoolTestCase(IsolatedAsyncioTestCase):
         self.task_pool._enough_room._value = room
         del self.task_pool._running[count]
 
+        mock_awaitable = mock_coroutine()
         mock_create_task.side_effect = test_exception = TestException()
         with self.assertRaises(TestException) as e:
             await self.task_pool._start_task(mock_awaitable, ignore_closed,
                                              end_callback=mock_end_cb, cancel_callback=mock_cancel_cb)
             self.assertEqual(test_exception, e)
+        await mock_awaitable
         self.assertEqual(count + 1, self.task_pool._counter)
         self.assertNotIn(count, self.task_pool._running)
         self.assertEqual(room, self.task_pool._enough_room._value)

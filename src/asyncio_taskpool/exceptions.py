@@ -24,3 +24,7 @@ class InvalidTaskID(PoolException):
 
 class PoolStillOpen(PoolException):
     pass
+
+
+class NotCoroutine(PoolException):
+    pass

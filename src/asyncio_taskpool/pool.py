@@ -1,13 +1,15 @@
 import logging
 from asyncio import gather
-from asyncio.coroutines import iscoroutinefunction
+from asyncio.coroutines import iscoroutine, iscoroutinefunction
 from asyncio.exceptions import CancelledError
 from asyncio.locks import Event, Semaphore
 from asyncio.tasks import Task, create_task
+from functools import partial
 from math import inf
-from typing import Any, Awaitable, Callable, Dict, Iterable, Iterator, List, Optional, Tuple
+from typing import Any, Awaitable, Dict, Iterable, Iterator, List
 
 from . import exceptions
+from .helpers import execute_optional, star_function
 from .types import ArgsT, KwArgsT, CoroutineFunc, EndCallbackT, CancelCallbackT
 
 
@@ -135,7 +137,7 @@ class BaseTaskPool:
         self._cancelled[task_id] = self._running.pop(task_id)
         self._num_cancelled += 1
         log.debug("Cancelled %s", self._task_name(task_id))
-        await _execute_function(custom_callback, args=(task_id, ))
+        await execute_optional(custom_callback, args=(task_id,))
 
     async def _task_ending(self, task_id: int, custom_callback: EndCallbackT = None) -> None:
         """
@@ -157,7 +159,7 @@ class BaseTaskPool:
         self._num_ended += 1
         self._enough_room.release()
         log.info("Ended %s", self._task_name(task_id))
-        await _execute_function(custom_callback, args=(task_id, ))
+        await execute_optional(custom_callback, args=(task_id,))
 
     async def _task_wrapper(self, awaitable: Awaitable, task_id: int, end_callback: EndCallbackT = None,
                             cancel_callback: CancelCallbackT = None) -> Any:
@@ -207,6 +209,8 @@ class BaseTaskPool:
         Raises:
             `asyncio_taskpool.exceptions.PoolIsClosed` if the pool has been closed and `ignore_closed` is `False`.
         """
+        if not iscoroutine(awaitable):
+            raise exceptions.NotCoroutine(f"Not awaitable: {awaitable}")
         if not (self.is_open or ignore_closed):
             raise exceptions.PoolIsClosed("Cannot start new tasks")
         await self._enough_room.acquire()
@@ -342,45 +346,47 @@ class TaskPool(BaseTaskPool):
         return await self._start_task(func(*args, **kwargs), end_callback=end_callback, cancel_callback=cancel_callback)
 
     async def apply(self, func: CoroutineFunc, args: ArgsT = (), kwargs: KwArgsT = None, num: int = 1,
-                    end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> Tuple[int]:
-        return tuple(await self._apply_one(func, args, kwargs, end_callback, cancel_callback) for _ in range(num))
+                    end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> List[int]:
+        ids = await gather(*(self._apply_one(func, args, kwargs, end_callback, cancel_callback) for _ in range(num)))
+        # TODO: for some reason PyCharm wrongly claims that `gather` returns a tuple of exceptions
+        assert isinstance(ids, list)
+        return ids
 
-    @staticmethod
-    def _get_next_coroutine(func: CoroutineFunc, args_iter: Iterator[Any], arg_stars: int = 0) -> Optional[Awaitable]:
+    async def _next_callback(self, task_id: int, func: CoroutineFunc, args_iter: Iterator[Any], arg_stars: int = 0,
+                             end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
+        reached_end = await self._start_next_task(func, args_iter, arg_stars=arg_stars,
+                                                  end_callback=end_callback, cancel_callback=cancel_callback)
+        if reached_end:
+            self._all_tasks_known_flag.set()
+        await execute_optional(end_callback, args=(task_id,))
+
+    async def _start_next_task(self, func: CoroutineFunc, args_iter: Iterator[Any], arg_stars: int = 0,
+                               end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> bool:
+        if self._interrupt_flag.is_set():
+            return True
         try:
-            arg = next(args_iter)
+            await self._start_task(
+                star_function(func, next(args_iter), arg_stars=arg_stars),
+                ignore_closed=True,
+                end_callback=partial(TaskPool._next_callback, self, func=func, args_iter=args_iter, arg_stars=arg_stars,
+                                     end_callback=end_callback, cancel_callback=cancel_callback),
+                cancel_callback=cancel_callback
+            )
         except StopIteration:
-            return
-        if arg_stars == 0:
-            return func(arg)
-        if arg_stars == 1:
-            return func(*arg)
-        if arg_stars == 2:
-            return func(**arg)
-        raise ValueError
+            return True
+        return False
 
     async def _map(self, func: CoroutineFunc, args_iter: ArgsT, arg_stars: int = 0, num_tasks: int = 1,
                    end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
-
+        if not self.is_open:
+            raise exceptions.PoolIsClosed("Cannot start new tasks")
         if self._all_tasks_known_flag.is_set():
             self._all_tasks_known_flag.clear()
         args_iter = iter(args_iter)
-
-        async def _start_next_coroutine() -> bool:
-            cor = self._get_next_coroutine(func, args_iter, arg_stars)
-            if cor is None or self._interrupt_flag.is_set():
-                self._all_tasks_known_flag.set()
-                return True
-            await self._start_task(cor, ignore_closed=True, end_callback=_start_next, cancel_callback=cancel_callback)
-            return False
-
-        async def _start_next(task_id: int) -> None:
-            await _start_next_coroutine()
-            await _execute_function(end_callback, args=(task_id, ))
-
         for _ in range(num_tasks):
-            reached_end = await _start_next_coroutine()
+            reached_end = await self._start_next_task(func, args_iter, arg_stars, end_callback, cancel_callback)
             if reached_end:
+                self._all_tasks_known_flag.set()
                 break
 
     async def map(self, func: CoroutineFunc, args_iter: ArgsT, num_tasks: int = 1,
@@ -403,6 +409,8 @@ class SimpleTaskPool(BaseTaskPool):
     def __init__(self, func: CoroutineFunc, args: ArgsT = (), kwargs: KwArgsT = None,
                  end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None,
                  name: str = None) -> None:
+        if not iscoroutinefunction(func):
+            raise exceptions.NotCoroutine(f"Not a coroutine function: {func}")
         self._func: CoroutineFunc = func
         self._args: ArgsT = args
         self._kwargs: KwArgsT = kwargs if kwargs is not None else {}
@@ -437,13 +445,3 @@ class SimpleTaskPool(BaseTaskPool):
 
     def stop_all(self) -> List[int]:
         return self.stop(self.size)
-
-
-async def _execute_function(func: Callable, args: ArgsT = (), kwargs: KwArgsT = None) -> None:
-    if kwargs is None:
-        kwargs = {}
-    if callable(func):
-        if iscoroutinefunction(func):
-            await func(*args, **kwargs)
-        else:
-            func(*args, **kwargs)
