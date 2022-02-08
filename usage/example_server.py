@@ -48,12 +48,12 @@ async def main() -> None:
     control_server_task = await UnixControlServer(pool, path='/tmp/py_asyncio_taskpool.sock').serve_forever()
     # We block until `.task_done()` has been called once by our workers for every item placed into the queue.
     await q.join()
-    # Since we don't need any "work" done anymore, we can close our control server by cancelling the task.
+    # Since we don't need any "work" done anymore, we can lock our control server by cancelling the task.
     control_server_task.cancel()
     # Since our workers should now be stuck waiting for more items to pick from the queue, but no items are left,
     # we can now safely cancel their tasks.
     pool.stop_all()
-    pool.close()
+    pool.lock()
     # Finally we allow for all tasks to do do their cleanup, if they need to do any, upon being cancelled.
     # We block until they all return or raise an exception, but since we are not interested in any of their exceptions,
     # we just silently collect their exceptions along with their return values.

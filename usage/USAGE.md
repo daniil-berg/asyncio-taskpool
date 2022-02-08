@@ -7,12 +7,12 @@ The minimum required setup is a "worker" coroutine function that can do somethin
 The following demo code enables full log output first for additional clarity. It is complete and should work as is.
 
 ### Code
+
 ```python
 import logging
 import asyncio
 
 from asyncio_taskpool.pool import SimpleTaskPool
-
 
 logging.getLogger().setLevel(logging.NOTSET)
 logging.getLogger('asyncio_taskpool').addHandler(logging.StreamHandler())
@@ -38,7 +38,7 @@ async def main() -> None:
     await pool.start()  # launches work task 3
     await asyncio.sleep(1.5)  # lets the tasks work for a bit
     pool.stop(2)  # cancels tasks 3 and 2
-    pool.close()  # required for the last line
+    pool.lock()  # required for the last line
     await pool.gather()  # awaits all tasks, then flushes the pool
 
 
@@ -60,7 +60,7 @@ did 1
 did 1
 did 1
 did 0
-SimpleTaskPool-0 is closed!
+SimpleTaskPool-0 is locked!
 Cancelling SimpleTaskPool-0_Task-3 ...
 Cancelled SimpleTaskPool-0_Task-3
 Ended SimpleTaskPool-0_Task-3
@@ -86,12 +86,12 @@ As with the simple example, we need "worker" coroutine functions that can do som
 The following demo code enables full log output first for additional clarity. It is complete and should work as is.
 
 ### Code
+
 ```python
 import logging
 import asyncio
 
 from asyncio_taskpool.pool import TaskPool
-
 
 logging.getLogger().setLevel(logging.NOTSET)
 logging.getLogger('asyncio_taskpool').addHandler(logging.StreamHandler())
@@ -132,8 +132,8 @@ async def main() -> None:
     print("Calling `starmap`...")
     await pool.starmap(other_work, args_list, num_tasks=2)
     print("`starmap` returned")
-    # Now we close the pool, so that we can safely await all our tasks.
-    pool.close()
+    # Now we lock the pool, so that we can safely await all our tasks.
+    pool.lock()
     # Finally, we block, until all tasks have ended.
     print("Called `gather`")
     await pool.gather()
@@ -177,7 +177,7 @@ work with 150
 work with 150
 other_work with 8
 Ended TaskPool-0_Task-2    <--- here Task-2 makes room in the pool and unblocks `main()`
-TaskPool-0 is closed!
+TaskPool-0 is locked!
 Started TaskPool-0_Task-3
 other_work with 9
 `starmap` returned

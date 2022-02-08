@@ -2,7 +2,7 @@ class PoolException(Exception):
     pass
 
 
-class PoolIsClosed(PoolException):
+class PoolIsLocked(PoolException):
     pass
 
 
@@ -22,7 +22,7 @@ class InvalidTaskID(PoolException):
     pass
 
 
-class PoolStillOpen(PoolException):
+class PoolStillUnlocked(PoolException):
     pass
 
 

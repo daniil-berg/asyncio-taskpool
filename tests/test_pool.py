@@ -68,7 +68,7 @@ class BaseTaskPoolTestCase(CommonTestCase):
 
     def test_init(self):
         self.assertIsInstance(self.task_pool._enough_room, asyncio.locks.Semaphore)
-        self.assertTrue(self.task_pool._open)
+        self.assertFalse(self.task_pool._locked)
         self.assertEqual(0, self.task_pool._counter)
         self.assertDictEqual(EMPTY_DICT, self.task_pool._running)
         self.assertDictEqual(EMPTY_DICT, self.task_pool._cancelled)
@@ -103,9 +103,23 @@ class BaseTaskPoolTestCase(CommonTestCase):
         self.task_pool.pool_size = new_size = 69
         self.assertEqual(new_size, self.task_pool._pool_size)
 
-    def test_is_open(self):
-        self.task_pool._open = FOO
-        self.assertEqual(FOO, self.task_pool.is_open)
+    def test_is_locked(self):
+        self.task_pool._locked = FOO
+        self.assertEqual(FOO, self.task_pool.is_locked)
+
+    def test_lock(self):
+        assert not self.task_pool._locked
+        self.task_pool.lock()
+        self.assertTrue(self.task_pool._locked)
+        self.task_pool.lock()
+        self.assertTrue(self.task_pool._locked)
+
+    def test_unlock(self):
+        self.task_pool._locked = True
+        self.task_pool.unlock()
+        self.assertFalse(self.task_pool._locked)
+        self.task_pool.unlock()
+        self.assertFalse(self.task_pool._locked)
 
     def test_num_running(self):
         self.task_pool._running = ['foo', 'bar', 'baz']
@@ -211,11 +225,9 @@ class BaseTaskPoolTestCase(CommonTestCase):
     @patch.object(pool, 'create_task')
     @patch.object(pool.BaseTaskPool, '_task_wrapper', new_callable=MagicMock)
     @patch.object(pool.BaseTaskPool, '_task_name', return_value=FOO)
-    @patch.object(pool.BaseTaskPool, 'is_open', new_callable=PropertyMock)
-    async def test__start_task(self, mock_is_open: MagicMock, mock__task_name: MagicMock,
-                               mock__task_wrapper: AsyncMock, mock_create_task: MagicMock):
+    async def test__start_task(self, mock__task_name: MagicMock, mock__task_wrapper: AsyncMock,
+                               mock_create_task: MagicMock):
         def reset_mocks() -> None:
-            mock_is_open.reset_mock()
             mock__task_name.reset_mock()
             mock__task_wrapper.reset_mock()
             mock_create_task.reset_mock()
@@ -226,31 +238,27 @@ class BaseTaskPoolTestCase(CommonTestCase):
         self.task_pool._counter = count = 123
         self.task_pool._enough_room._value = room = 123
 
+        def check_nothing_changed() -> None:
+            self.assertEqual(count, self.task_pool._counter)
+            self.assertNotIn(count, self.task_pool._running)
+            self.assertEqual(room, self.task_pool._enough_room._value)
+            mock__task_name.assert_not_called()
+            mock__task_wrapper.assert_not_called()
+            mock_create_task.assert_not_called()
+            reset_mocks()
+
         with self.assertRaises(exceptions.NotCoroutine):
             await self.task_pool._start_task(MagicMock(), end_callback=mock_end_cb, cancel_callback=mock_cancel_cb)
-        self.assertEqual(count, self.task_pool._counter)
-        self.assertNotIn(count, self.task_pool._running)
-        self.assertEqual(room, self.task_pool._enough_room._value)
-        mock_is_open.assert_not_called()
-        mock__task_name.assert_not_called()
-        mock__task_wrapper.assert_not_called()
-        mock_create_task.assert_not_called()
-        reset_mocks()
+        check_nothing_changed()
 
-        mock_is_open.return_value = ignore_closed = False
+        self.task_pool._locked = True
+        ignore_closed = False
         mock_awaitable = mock_coroutine()
-        with self.assertRaises(exceptions.PoolIsClosed):
+        with self.assertRaises(exceptions.PoolIsLocked):
             await self.task_pool._start_task(mock_awaitable, ignore_closed,
                                              end_callback=mock_end_cb, cancel_callback=mock_cancel_cb)
         await mock_awaitable
-        self.assertEqual(count, self.task_pool._counter)
-        self.assertNotIn(count, self.task_pool._running)
-        self.assertEqual(room, self.task_pool._enough_room._value)
-        mock_is_open.assert_called_once_with()
-        mock__task_name.assert_not_called()
-        mock__task_wrapper.assert_not_called()
-        mock_create_task.assert_not_called()
-        reset_mocks()
+        check_nothing_changed()
 
         ignore_closed = True
         mock_awaitable = mock_coroutine()
@@ -261,7 +269,6 @@ class BaseTaskPoolTestCase(CommonTestCase):
         self.assertEqual(count + 1, self.task_pool._counter)
         self.assertEqual(mock_task, self.task_pool._running[count])
         self.assertEqual(room - 1, self.task_pool._enough_room._value)
-        mock_is_open.assert_called_once_with()
         mock__task_name.assert_called_once_with(count)
         mock__task_wrapper.assert_called_once_with(mock_awaitable, count, mock_end_cb, mock_cancel_cb)
         mock_create_task.assert_called_once_with(mock_wrapped, name=FOO)
@@ -280,7 +287,6 @@ class BaseTaskPoolTestCase(CommonTestCase):
         self.assertEqual(count + 1, self.task_pool._counter)
         self.assertNotIn(count, self.task_pool._running)
         self.assertEqual(room, self.task_pool._enough_room._value)
-        mock_is_open.assert_called_once_with()
         mock__task_name.assert_called_once_with(count)
         mock__task_wrapper.assert_called_once_with(mock_awaitable, count, mock_end_cb, mock_cancel_cb)
         mock_create_task.assert_called_once_with(mock_wrapped, name=FOO)
@@ -345,11 +351,6 @@ class BaseTaskPoolTestCase(CommonTestCase):
         self.assertDictEqual(self.task_pool._ended, EMPTY_DICT)
         self.assertDictEqual(self.task_pool._cancelled, EMPTY_DICT)
 
-    def test_close(self):
-        assert self.task_pool._open
-        self.task_pool.close()
-        self.assertFalse(self.task_pool._open)
-
     async def test_gather(self):
         test_exception = TestException()
         mock_ended_func, mock_cancelled_func = AsyncMock(return_value=FOO), AsyncMock(side_effect=test_exception)
@@ -361,8 +362,8 @@ class BaseTaskPoolTestCase(CommonTestCase):
         self.task_pool._running = running = {789: mock_running_func()}
         self.task_pool._interrupt_flag.set()
 
-        assert self.task_pool._open
-        with self.assertRaises(exceptions.PoolStillOpen):
+        assert not self.task_pool._locked
+        with self.assertRaises(exceptions.PoolStillUnlocked):
             await self.task_pool.gather()
         self.assertDictEqual(self.task_pool._ended, ended)
         self.assertDictEqual(self.task_pool._cancelled, cancelled)
@@ -370,7 +371,7 @@ class BaseTaskPoolTestCase(CommonTestCase):
         self.assertListEqual(self.task_pool._before_gathering, before_gather)
         self.assertTrue(self.task_pool._interrupt_flag.is_set())
 
-        self.task_pool._open = False
+        self.task_pool._locked = True
 
         def check_assertions(output) -> None:
             self.assertListEqual([FOO, test_exception, BAR], output)
@@ -449,7 +450,7 @@ class TaskPoolTestCase(CommonTestCase):
         mock_flag, end_cb, cancel_cb = MagicMock(), MagicMock(), MagicMock()
         self.assertIsNone(await self.task_pool._queue_consumer(q, mock_flag, mock_func, stars, end_cb, cancel_cb))
         self.assertTrue(q.empty())
-        mock__start_task.assert_awaited_once_with(awaitable, ignore_closed=True,
+        mock__start_task.assert_awaited_once_with(awaitable, ignore_lock=True,
                                                   end_callback=queue_callback, cancel_callback=cancel_cb)
         mock_star_function.assert_called_once_with(mock_func, arg, arg_stars=stars)
         mock_partial.assert_called_once_with(pool.TaskPool._queue_callback, self.task_pool,
@@ -459,7 +460,7 @@ class TaskPoolTestCase(CommonTestCase):
         mock_star_function.reset_mock()
         mock_partial.reset_mock()
 
-        self.assertIsNone(await self.task_pool._queue_consumer(q, mock_func, stars, end_cb, cancel_cb))
+        self.assertIsNone(await self.task_pool._queue_consumer(q, mock_flag, mock_func, stars, end_cb, cancel_cb))
         self.assertTrue(q.empty())
         mock__start_task.assert_not_awaited()
         mock_star_function.assert_not_called()
@@ -528,9 +529,8 @@ class TaskPoolTestCase(CommonTestCase):
     @patch.object(pool, 'Event')
     @patch.object(pool.TaskPool, '_queue_consumer')
     @patch.object(pool.TaskPool, '_set_up_args_queue')
-    @patch.object(pool.TaskPool, 'is_open', new_callable=PropertyMock)
-    async def test__map(self, mock_is_open: MagicMock, mock__set_up_args_queue: MagicMock,
-                        mock__queue_consumer: AsyncMock, mock_event_cls: MagicMock):
+    async def test__map(self, mock__set_up_args_queue: MagicMock, mock__queue_consumer: AsyncMock,
+                        mock_event_cls: MagicMock):
         qsize = 4
         mock__set_up_args_queue.return_value = mock_q = MagicMock(qsize=MagicMock(return_value=qsize))
         mock_flag_set = MagicMock()
@@ -540,17 +540,14 @@ class TaskPoolTestCase(CommonTestCase):
         args_iter, num_tasks = (FOO, BAR, 1, 2, 3), 2
         end_cb, cancel_cb = MagicMock(), MagicMock()
 
-        mock_is_open.return_value = False
-        with self.assertRaises(exceptions.PoolIsClosed):
+        self.task_pool._locked = False
+        with self.assertRaises(exceptions.PoolIsLocked):
             await self.task_pool._map(mock_func, args_iter, stars, num_tasks, end_cb, cancel_cb)
-        mock_is_open.assert_called_once_with()
         mock__set_up_args_queue.assert_not_called()
         mock__queue_consumer.assert_not_awaited()
         mock_flag_set.assert_not_called()
 
-        mock_is_open.reset_mock()
-
-        mock_is_open.return_value = True
+        self.task_pool._locked = True
         self.assertIsNone(await self.task_pool._map(mock_func, args_iter, stars, num_tasks, end_cb, cancel_cb))
         mock__set_up_args_queue.assert_called_once_with(args_iter, num_tasks)
         mock__queue_consumer.assert_has_awaits(qsize * [call(mock_q, mock_flag, mock_func, arg_stars=stars,
