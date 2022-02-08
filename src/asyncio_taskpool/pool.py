@@ -498,38 +498,47 @@ class TaskPool(BaseTaskPool):
         await self._queue_consumer(q, func, arg_stars, end_callback=end_callback, cancel_callback=cancel_callback)
         await execute_optional(end_callback, args=(task_id,))
 
-    def _fill_args_queue(self, q: Queue, args_iter: ArgsT, num_tasks: int) -> None:
+    def _set_up_args_queue(self, args_iter: ArgsT, num_tasks: int) -> Queue:
         """
         Helper function for `_map()`.
-        Takes the iterable of function arguments `args_iter` and adds up to `num_tasks` to the arguments queue `q`.
+        Takes the iterable of function arguments `args_iter` and adds up to `num_tasks` to a new `asyncio.Queue`.
+        The queue's `join()` method is added to the pool's `_before_gathering` list and the queue is returned.
 
-        If the iterable contains less than `num_tasks` elements, nothing else happens.
-        Otherwise the `_queue_producer` is started with the arguments queue and and iterator of the remaining arguments.
+        If the iterable contains less than `num_tasks` elements, nothing else happens; otherwise the `_queue_producer`
+        is started as a separate task with the arguments queue and and iterator of the remaining arguments.
 
         Args:
-            q:
-                The (empty) new `asyncio.Queue` to hold the function arguments passed as `args_iter`.
             args_iter:
                 The iterable of function arguments passed into `_map()` to use for creating the new tasks.
             num_tasks:
                 The maximum number of the new tasks to run concurrently that was passed into `_map()`.
+
+        Returns:
+            The newly created and filled arguments queue for spawning new tasks.
         """
+        # Setting the `maxsize` of the queue to `num_tasks` will ensure that no more than `num_tasks` tasks will run
+        # concurrently because the size of the queue is what will determine the number of immediately started tasks in
+        # the `_map()` method and each of those will only ever start (at most) one other task upon ending.
+        args_queue = Queue(maxsize=num_tasks)
+        self._before_gathering.append(join_queue(args_queue))
         args_iter = iter(args_iter)
         try:
             # Here we guarantee that the queue will contain as many arguments as needed for starting the first batch of
             # tasks, which will be at most `num_tasks` (meaning the queue will be full).
             for i in range(num_tasks):
-                q.put_nowait(next(args_iter))
+                args_queue.put_nowait(next(args_iter))
         except StopIteration:
             # If we get here, this means that the number of elements in the arguments iterator was less than the
-            # specified `num_tasks`. Thus, the number of tasks to start immediately will be the size of the queue.
+            # specified `num_tasks`. Still, the number of tasks to start immediately will be the size of the queue.
             # The `_queue_producer` won't be necessary, since we already put all the elements in the queue.
-            return
-        # There may be more elements in the arguments iterator, so we need the `_queue_producer`.
-        # It will have exclusive access to the `args_iter` from now on.
-        # If the queue is full already, it will wait until one of the tasks in the first batch ends, before putting
-        # the next item in it.
-        create_task(self._queue_producer(q, args_iter))
+            pass
+        else:
+            # There may be more elements in the arguments iterator, so we need the `_queue_producer`.
+            # It will have exclusive access to the `args_iter` from now on.
+            # Since the queue is full already, it will wait until one of the tasks in the first batch ends,
+            # before putting the next item in it.
+            create_task(self._queue_producer(args_queue, args_iter))
+        return args_queue
 
     async def _map(self, func: CoroutineFunc, args_iter: ArgsT, arg_stars: int = 0, num_tasks: int = 1,
                    end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
@@ -542,7 +551,6 @@ class TaskPool(BaseTaskPool):
         This method blocks, **only if** there is not enough room in the pool for the first batch of new tasks.
 
         It sets up an internal arguments queue which is continuously filled while consuming the arguments iterable.
-        The queue's `join()` method is added to the pool's `_before_gathering` list.
 
         Args:
             func:
@@ -565,9 +573,7 @@ class TaskPool(BaseTaskPool):
         """
         if not self.is_open:
             raise exceptions.PoolIsClosed("Cannot start new tasks")
-        args_queue = Queue(maxsize=num_tasks)
-        self._before_gathering.append(join_queue(args_queue))
-        self._fill_args_queue(args_queue, args_iter, num_tasks)
+        args_queue = self._set_up_args_queue(args_iter, num_tasks)
         for _ in range(args_queue.qsize()):
             # This is where blocking can occur, if the pool is full.
             await self._queue_consumer(args_queue, func,
