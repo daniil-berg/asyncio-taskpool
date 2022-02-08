@@ -126,9 +126,8 @@ async def main() -> None:
     # The second one will start (with ID 3), only once there is room in the pool,
     # which -- in this example -- will be the case after ID 2 ends;
     # until then the `starmap` method call **will block**!
-    # Once there is room in the pool again, the third one will start immediately (and receive ID 4).
-    # The last one will start (with ID 5) **only** once there is room in the pool **and** no more than one of these 
-    # last four tasks is running.
+    # Once there is room in the pool again, the third and fourth will each start (with IDs 4 and 5)
+    # **only** once there is room in the pool **and** no more than one of these last four tasks is running.
     args_list = [(0, 10), (10, 20), (20, 30), (30, 40)]
     print("Calling `starmap`...")
     await pool.starmap(other_work, args_list, num_tasks=2)
