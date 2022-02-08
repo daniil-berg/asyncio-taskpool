@@ -63,8 +63,8 @@ class ControlServer(ABC):  # TODO: Implement interface for normal TaskPool insta
         writer.write(str(self._pool.stop_all()).encode())
 
     def _pool_size(self, writer: StreamWriter) -> None:
-        log.debug("%s requests pool size", self.client_class.__name__)
-        writer.write(str(self._pool.size).encode())
+        log.debug("%s requests number of running tasks", self.client_class.__name__)
+        writer.write(str(self._pool.num_running).encode())
 
     def _pool_func(self, writer: StreamWriter) -> None:
         log.debug("%s requests pool function", self.client_class.__name__)
@@ -83,7 +83,7 @@ class ControlServer(ABC):  # TODO: Implement interface for normal TaskPool insta
                 self._stop_tasks(writer, arg)
             elif cmd == constants.CMD_STOP_ALL:
                 self._stop_all_tasks(writer)
-            elif cmd == constants.CMD_SIZE:
+            elif cmd == constants.CMD_NUM_RUNNING:
                 self._pool_size(writer)
             elif cmd == constants.CMD_FUNC:
                 self._pool_func(writer)

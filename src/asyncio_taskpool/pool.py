@@ -638,9 +638,45 @@ class TaskPool(BaseTaskPool):
 
 
 class SimpleTaskPool(BaseTaskPool):
+    """
+    Simplified task pool class.
+
+    A `SimpleTaskPool` instance can manage an arbitrary number of concurrent tasks,
+    but they **must** come from a single coroutine function, called with the same arguments.
+
+    The coroutine function and its arguments are defined upon initialization.
+
+    As long as there is room in the pool, more tasks can be added. (By default, there is no pool size limit.)
+    Each task started in the pool receives a unique ID, which can be used to cancel specific tasks at any moment.
+    However, since all tasks come from the same function-arguments-combination, the specificity of the `cancel()` method
+    is probably unnecessary. Instead, a simpler `stop()` method is introduced.
+
+    Adding tasks blocks **only if** the pool is full at that moment.
+    """
+
     def __init__(self, func: CoroutineFunc, args: ArgsT = (), kwargs: KwArgsT = None,
                  end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None,
-                 name: str = None) -> None:
+                 pool_size: int = inf, name: str = None) -> None:
+        """
+
+        Args:
+            func:
+                The function to use for spawning new tasks within the pool.
+            args (optional):
+                The positional arguments to pass into each function call.
+            kwargs (optional):
+                The keyword-arguments to pass into each function call.
+            end_callback (optional):
+                A callback to execute after a task has ended.
+                It is run with the task's ID as its only positional argument.
+            cancel_callback (optional):
+                A callback to execute after cancellation of a task.
+                It is run with the task's ID as its only positional argument.
+            pool_size (optional):
+                The maximum number of tasks allowed to run concurrently in the pool
+            name (optional):
+                An optional name for the pool.
+        """
         if not iscoroutinefunction(func):
             raise exceptions.NotCoroutine(f"Not a coroutine function: {func}")
         self._func: CoroutineFunc = func
@@ -648,32 +684,39 @@ class SimpleTaskPool(BaseTaskPool):
         self._kwargs: KwArgsT = kwargs if kwargs is not None else {}
         self._end_callback: EndCallbackT = end_callback
         self._cancel_callback: CancelCallbackT = cancel_callback
-        super().__init__(name=name)
+        super().__init__(pool_size=pool_size, name=name)
 
     @property
     def func_name(self) -> str:
+        """Returns the name of the coroutine function used in the pool."""
         return self._func.__name__
 
-    @property
-    def size(self) -> int:
-        return self.num_running
-
     async def _start_one(self) -> int:
+        """Starts a single new task within the pool and returns its ID."""
         return await self._start_task(self._func(*self._args, **self._kwargs),
                                       end_callback=self._end_callback, cancel_callback=self._cancel_callback)
 
     async def start(self, num: int = 1) -> List[int]:
-        return [await self._start_one() for _ in range(num)]
+        """Starts `num` new tasks within the pool and returns their IDs as a list."""
+        ids = await gather(*(self._start_one() for _ in range(num)))
+        assert isinstance(ids, list)  # for PyCharm (see above to-do-item)
+        return ids
 
     def stop(self, num: int = 1) -> List[int]:
-        num = min(num, self.size)
+        """
+        Cancels `num` running tasks within the pool and returns their IDs as a list.
+
+        The tasks are canceled in LIFO order, meaning tasks started later will be stopped before those started earlier.
+        If `num` is greater than or equal to the number of currently running tasks, naturally all tasks are cancelled.
+        """
         ids = []
         for i, task_id in enumerate(reversed(self._running)):
             if i >= num:
-                break
+                break  # We got the desired number of task IDs, there may well be more tasks left to keep running
             ids.append(task_id)
         self.cancel(*ids)
         return ids
 
     def stop_all(self) -> List[int]:
-        return self.stop(self.size)
+        """Cancels all running tasks and returns their IDs as a list."""
+        return self.stop(self.num_running)

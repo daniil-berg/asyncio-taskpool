@@ -574,3 +574,91 @@ class TaskPoolTestCase(CommonTestCase):
         self.assertIsNone(await self.task_pool.doublestarmap(mock_func, kwargs_iter, num_tasks, end_cb, cancel_cb))
         mock__map.assert_awaited_once_with(mock_func, kwargs_iter, arg_stars=2, num_tasks=num_tasks,
                                            end_callback=end_cb, cancel_callback=cancel_cb)
+
+
+class SimpleTaskPoolTestCase(CommonTestCase):
+    TEST_CLASS = pool.SimpleTaskPool
+    task_pool: pool.SimpleTaskPool
+
+    TEST_POOL_FUNC = AsyncMock(__name__=FOO)
+    TEST_POOL_ARGS = (FOO, BAR)
+    TEST_POOL_KWARGS = {'a': 1, 'b': 2}
+    TEST_POOL_END_CB = MagicMock()
+    TEST_POOL_CANCEL_CB = MagicMock()
+
+    def get_task_pool_init_params(self) -> dict:
+        return super().get_task_pool_init_params() | {
+            'func': self.TEST_POOL_FUNC,
+            'args': self.TEST_POOL_ARGS,
+            'kwargs': self.TEST_POOL_KWARGS,
+            'end_callback': self.TEST_POOL_END_CB,
+            'cancel_callback': self.TEST_POOL_CANCEL_CB,
+        }
+
+    def setUp(self) -> None:
+        self.base_class_init_patcher = patch.object(pool.BaseTaskPool, '__init__')
+        self.base_class_init = self.base_class_init_patcher.start()
+        super().setUp()
+
+    def tearDown(self) -> None:
+        self.base_class_init_patcher.stop()
+
+    def test_init(self):
+        self.assertEqual(self.TEST_POOL_FUNC, self.task_pool._func)
+        self.assertEqual(self.TEST_POOL_ARGS, self.task_pool._args)
+        self.assertEqual(self.TEST_POOL_KWARGS, self.task_pool._kwargs)
+        self.assertEqual(self.TEST_POOL_END_CB, self.task_pool._end_callback)
+        self.assertEqual(self.TEST_POOL_CANCEL_CB, self.task_pool._cancel_callback)
+        self.base_class_init.assert_called_once_with(pool_size=self.TEST_POOL_SIZE, name=self.TEST_POOL_NAME)
+
+        with self.assertRaises(exceptions.NotCoroutine):
+            pool.SimpleTaskPool(MagicMock())
+
+    def test_func_name(self):
+        self.assertEqual(self.TEST_POOL_FUNC.__name__, self.task_pool.func_name)
+
+    @patch.object(pool.SimpleTaskPool, '_start_task')
+    async def test__start_one(self, mock__start_task: AsyncMock):
+        mock__start_task.return_value = expected_output = 99
+        self.task_pool._func = MagicMock(return_value=BAR)
+        output = await self.task_pool._start_one()
+        self.assertEqual(expected_output, output)
+        self.task_pool._func.assert_called_once_with(*self.task_pool._args, **self.task_pool._kwargs)
+        mock__start_task.assert_awaited_once_with(BAR, end_callback=self.task_pool._end_callback,
+                                                  cancel_callback=self.task_pool._cancel_callback)
+
+    @patch.object(pool.SimpleTaskPool, '_start_one')
+    async def test_start(self, mock__start_one: AsyncMock):
+        mock__start_one.return_value = FOO
+        num = 5
+        output = await self.task_pool.start(num)
+        expected_output = num * [FOO]
+        self.assertListEqual(expected_output, output)
+        mock__start_one.assert_has_awaits(num * [call()])
+
+    @patch.object(pool.SimpleTaskPool, 'cancel')
+    def test_stop(self, mock_cancel: MagicMock):
+        num = 2
+        id1, id2, id3 = 5, 6, 7
+        self.task_pool._running = {id1: FOO, id2: BAR, id3: FOO + BAR}
+        output = self.task_pool.stop(num)
+        expected_output = [id3, id2]
+        self.assertEqual(expected_output, output)
+        mock_cancel.assert_called_once_with(*expected_output)
+        mock_cancel.reset_mock()
+
+        num = 50
+        output = self.task_pool.stop(num)
+        expected_output = [id3, id2, id1]
+        self.assertEqual(expected_output, output)
+        mock_cancel.assert_called_once_with(*expected_output)
+
+    @patch.object(pool.SimpleTaskPool, 'num_running', new_callable=PropertyMock)
+    @patch.object(pool.SimpleTaskPool, 'stop')
+    def test_stop_all(self, mock_stop: MagicMock, mock_num_running: MagicMock):
+        mock_num_running.return_value = num = 9876
+        mock_stop.return_value = expected_output = 'something'
+        output = self.task_pool.stop_all()
+        self.assertEqual(expected_output, output)
+        mock_num_running.assert_called_once_with()
+        mock_stop.assert_called_once_with(num)
