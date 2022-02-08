@@ -1,4 +1,5 @@
 from asyncio.coroutines import iscoroutinefunction
+from asyncio.queues import Queue
 from typing import Any, Optional
 
 from .types import T, AnyCallableT, ArgsT, KwArgsT
@@ -22,3 +23,7 @@ def star_function(function: AnyCallableT, arg: Any, arg_stars: int = 0) -> T:
     if arg_stars == 2:
         return function(**arg)
     raise ValueError(f"Invalid argument arg_stars={arg_stars}; must be 0, 1, or 2.")
+
+
+async def join_queue(q: Queue) -> None:
+    await q.join()
