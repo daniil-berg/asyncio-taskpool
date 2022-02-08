@@ -446,14 +446,14 @@ class TaskPoolTestCase(CommonTestCase):
         q, arg = Queue(), 420.69
         q.put_nowait(arg)
         mock_func, stars = MagicMock(), 3
-        end_cb, cancel_cb = MagicMock(), MagicMock()
-        self.assertIsNone(await self.task_pool._queue_consumer(q, mock_func, stars, end_cb, cancel_cb))
+        mock_flag, end_cb, cancel_cb = MagicMock(), MagicMock(), MagicMock()
+        self.assertIsNone(await self.task_pool._queue_consumer(q, mock_flag, mock_func, stars, end_cb, cancel_cb))
         self.assertTrue(q.empty())
         mock__start_task.assert_awaited_once_with(awaitable, ignore_closed=True,
                                                   end_callback=queue_callback, cancel_callback=cancel_cb)
         mock_star_function.assert_called_once_with(mock_func, arg, arg_stars=stars)
         mock_partial.assert_called_once_with(pool.TaskPool._queue_callback, self.task_pool,
-                                             q=q, func=mock_func, arg_stars=stars,
+                                             q=q, first_batch_started=mock_flag, func=mock_func, arg_stars=stars,
                                              end_callback=end_cb, cancel_callback=cancel_cb)
         mock__start_task.reset_mock()
         mock_star_function.reset_mock()
@@ -470,9 +470,13 @@ class TaskPoolTestCase(CommonTestCase):
     async def test__queue_callback(self, mock__queue_consumer: AsyncMock, mock_execute_optional: AsyncMock):
         task_id, mock_q = 420, MagicMock()
         mock_func, stars = MagicMock(), 3
+        mock_wait = AsyncMock()
+        mock_flag = MagicMock(wait=mock_wait)
         end_cb, cancel_cb = MagicMock(), MagicMock()
-        self.assertIsNone(await self.task_pool._queue_callback(task_id, mock_q, mock_func, stars, end_cb, cancel_cb))
-        mock__queue_consumer.assert_awaited_once_with(mock_q, mock_func, stars,
+        self.assertIsNone(await self.task_pool._queue_callback(task_id, mock_q, mock_flag, mock_func, stars,
+                                                               end_callback=end_cb, cancel_callback=cancel_cb))
+        mock_wait.assert_awaited_once_with()
+        mock__queue_consumer.assert_awaited_once_with(mock_q, mock_flag, mock_func, stars,
                                                       end_callback=end_cb, cancel_callback=cancel_cb)
         mock_execute_optional.assert_awaited_once_with(end_cb, args=(task_id,))
 
@@ -521,13 +525,16 @@ class TaskPoolTestCase(CommonTestCase):
         mock__queue_producer.assert_not_called()
         mock_create_task.assert_not_called()
 
+    @patch.object(pool, 'Event')
     @patch.object(pool.TaskPool, '_queue_consumer')
     @patch.object(pool.TaskPool, '_set_up_args_queue')
     @patch.object(pool.TaskPool, 'is_open', new_callable=PropertyMock)
     async def test__map(self, mock_is_open: MagicMock, mock__set_up_args_queue: MagicMock,
-                        mock__queue_consumer: AsyncMock):
+                        mock__queue_consumer: AsyncMock, mock_event_cls: MagicMock):
         qsize = 4
         mock__set_up_args_queue.return_value = mock_q = MagicMock(qsize=MagicMock(return_value=qsize))
+        mock_flag_set = MagicMock()
+        mock_event_cls.return_value = mock_flag = MagicMock(set=mock_flag_set)
 
         mock_func, stars = MagicMock(), 3
         args_iter, num_tasks = (FOO, BAR, 1, 2, 3), 2
@@ -539,14 +546,16 @@ class TaskPoolTestCase(CommonTestCase):
         mock_is_open.assert_called_once_with()
         mock__set_up_args_queue.assert_not_called()
         mock__queue_consumer.assert_not_awaited()
+        mock_flag_set.assert_not_called()
 
         mock_is_open.reset_mock()
 
         mock_is_open.return_value = True
         self.assertIsNone(await self.task_pool._map(mock_func, args_iter, stars, num_tasks, end_cb, cancel_cb))
         mock__set_up_args_queue.assert_called_once_with(args_iter, num_tasks)
-        mock__queue_consumer.assert_has_awaits(qsize * [call(mock_q, mock_func, arg_stars=stars,
+        mock__queue_consumer.assert_has_awaits(qsize * [call(mock_q, mock_flag, mock_func, arg_stars=stars,
                                                              end_callback=end_cb, cancel_callback=cancel_cb)])
+        mock_flag_set.assert_called_once_with()
 
     @patch.object(pool.TaskPool, '_map')
     async def test_map(self, mock__map: AsyncMock):

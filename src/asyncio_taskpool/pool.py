@@ -438,7 +438,7 @@ class TaskPool(BaseTaskPool):
                 break
             await q.put(arg)  # This blocks as long as the queue is full.
 
-    async def _queue_consumer(self, q: Queue, func: CoroutineFunc, arg_stars: int = 0,
+    async def _queue_consumer(self, q: Queue, first_batch_started: Event, func: CoroutineFunc, arg_stars: int = 0,
                               end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
         """
         Wrapper around the `_start_task()` taking the next element from the arguments queue set up in `_map()`.
@@ -447,6 +447,9 @@ class TaskPool(BaseTaskPool):
         Args:
             q:
                 The queue of function arguments to consume for starting the next task.
+            first_batch_started:
+                The event flag to wait for, before launching the next consumer.
+                It can only set by the `_map()` method, which happens after the first batch of task has been started.
             func:
                 The coroutine function to use for spawning the tasks within the task pool.
             arg_stars (optional):
@@ -466,15 +469,17 @@ class TaskPool(BaseTaskPool):
             await self._start_task(
                 star_function(func, arg, arg_stars=arg_stars),
                 ignore_closed=True,
-                end_callback=partial(TaskPool._queue_callback, self, q=q, func=func, arg_stars=arg_stars,
-                                     end_callback=end_callback, cancel_callback=cancel_callback),
+                end_callback=partial(TaskPool._queue_callback, self, q=q, first_batch_started=first_batch_started,
+                                     func=func, arg_stars=arg_stars, end_callback=end_callback,
+                                     cancel_callback=cancel_callback),
                 cancel_callback=cancel_callback
             )
         finally:
             q.task_done()
 
-    async def _queue_callback(self, task_id: int, q: Queue, func: CoroutineFunc, arg_stars: int = 0,
-                              end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
+    async def _queue_callback(self, task_id: int, q: Queue, first_batch_started: Event, func: CoroutineFunc,
+                              arg_stars: int = 0, end_callback: EndCallbackT = None,
+                              cancel_callback: CancelCallbackT = None) -> None:
         """
         Wrapper around an end callback function passed into the `_map()` method.
         Triggers the next `_queue_consumer` with the same arguments.
@@ -484,6 +489,9 @@ class TaskPool(BaseTaskPool):
                 The ID of the ending task.
             q:
                 The queue of function arguments to consume for starting the next task.
+            first_batch_started:
+                The event flag to wait for, before launching the next consumer.
+                It can only set by the `_map()` method, which happens after the first batch of task has been started.
             func:
                 The coroutine function to use for spawning the tasks within the task pool.
             arg_stars (optional):
@@ -495,7 +503,9 @@ class TaskPool(BaseTaskPool):
                 The callback that was specified to execute after cancellation of the task (and the next one).
                 It is run with the `task_id` as its only positional argument.
         """
-        await self._queue_consumer(q, func, arg_stars, end_callback=end_callback, cancel_callback=cancel_callback)
+        await first_batch_started.wait()
+        await self._queue_consumer(q, first_batch_started, func, arg_stars,
+                                   end_callback=end_callback, cancel_callback=cancel_callback)
         await execute_optional(end_callback, args=(task_id,))
 
     def _set_up_args_queue(self, args_iter: ArgsT, num_tasks: int) -> Queue:
@@ -574,10 +584,18 @@ class TaskPool(BaseTaskPool):
         if not self.is_open:
             raise exceptions.PoolIsClosed("Cannot start new tasks")
         args_queue = self._set_up_args_queue(args_iter, num_tasks)
+        # We need a flag to ensure that starting all tasks from the first batch here will not be blocked by the
+        # `_queue_callback` triggered by one or more of them.
+        # This could happen, e.g. if the pool has just enough room for one more task, but the queue here contains more
+        # than one element, and the pool remains full until after the first task of the first batch ends. Then the
+        # callback might trigger the next `_queue_consumer` before this method can, which will keep it blocked.
+        first_batch_started = Event()
         for _ in range(args_queue.qsize()):
             # This is where blocking can occur, if the pool is full.
-            await self._queue_consumer(args_queue, func,
+            await self._queue_consumer(args_queue, first_batch_started, func,
                                        arg_stars=arg_stars, end_callback=end_callback, cancel_callback=cancel_callback)
+        # Now the callbacks can immediately trigger more tasks.
+        first_batch_started.set()
 
     async def map(self, func: CoroutineFunc, arg_iter: ArgsT, num_tasks: int = 1,
                   end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
