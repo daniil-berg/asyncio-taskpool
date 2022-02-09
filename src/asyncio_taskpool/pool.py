@@ -1,3 +1,36 @@
+__author__ = "Daniil Fajnberg"
+__copyright__ = "Copyright © 2022 Daniil Fajnberg"
+__license__ = """GNU LGPLv3.0
+
+This file is part of asyncio-taskpool.
+
+asyncio-taskpool is free software: you can redistribute it and/or modify it under the terms of
+version 3.0 of the GNU Lesser General Public License as published by the Free Software Foundation.
+
+asyncio-taskpool is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
+See the GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along with asyncio-taskpool. 
+If not, see <https://www.gnu.org/licenses/>."""
+
+__doc__ = """
+This module contains the definitions of the task pool classes.
+
+A task pool is an object with a simple interface for aggregating and dynamically managing asynchronous tasks.
+Generally speaking, a task is added to a pool by providing it with a coroutine function reference as well as the 
+arguments for that function.
+
+The `BaseTaskPool` class is a parent class and not intended for direct use.
+The `TaskPool` and `SimpleTaskPool` are subclasses intended for direct use.
+While the former allows for heterogeneous collections of tasks that can be entirely unrelated to one another, the 
+latter requires a preemptive decision about the function **and** its arguments upon initialization and only allows
+to dynamically control the **number** of tasks running at any point in time.
+
+For further details about the classes check their respective docstrings.
+"""
+
+
 import logging
 from asyncio import gather
 from asyncio.coroutines import iscoroutine, iscoroutinefunction

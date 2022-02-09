@@ -12,7 +12,7 @@ The following demo code enables full log output first for additional clarity. It
 import logging
 import asyncio
 
-from asyncio_taskpool.pool import SimpleTaskPool
+from asyncio_taskpool import SimpleTaskPool
 
 logging.getLogger().setLevel(logging.NOTSET)
 logging.getLogger('asyncio_taskpool').addHandler(logging.StreamHandler())
@@ -23,8 +23,8 @@ async def work(n: int) -> None:
     Pseudo-worker function. 
     Counts up to an integer with a second of sleep before each iteration.
     In a real-world use case, a worker function should probably have access 
-    to some synchronisation primitive or shared resource to distribute work 
-    between an arbitrary number of workers.
+    to some synchronisation primitive (such as a queue) or shared resource
+    to distribute work between an arbitrary number of workers.
     """
     for i in range(n):
         await asyncio.sleep(1)
@@ -91,7 +91,7 @@ The following demo code enables full log output first for additional clarity. It
 import logging
 import asyncio
 
-from asyncio_taskpool.pool import TaskPool
+from asyncio_taskpool import TaskPool
 
 logging.getLogger().setLevel(logging.NOTSET)
 logging.getLogger('asyncio_taskpool').addHandler(logging.StreamHandler())
@@ -181,7 +181,7 @@ TaskPool-0 is locked!
 Started TaskPool-0_Task-3
 other_work with 9
 `starmap` returned
-Called `gather`
+Called `gather`    <--- now this will block `main()` until all tasks have ended
 work with 160
 work with 160
 other_work with 10
@@ -229,3 +229,5 @@ other_work with 39
 Done.
 Ended TaskPool-0_Task-5
 ```
+
+© 2022 Daniil Fajnberg
