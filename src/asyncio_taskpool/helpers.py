@@ -19,9 +19,11 @@ Miscellaneous helper functions.
 """
 
 
+import re
 from asyncio.coroutines import iscoroutinefunction
 from asyncio.queues import Queue
-from typing import Any, Optional
+from inspect import getdoc
+from typing import Any, Optional, Union
 
 from .types import T, AnyCallableT, ArgsT, KwArgsT
 
@@ -48,3 +50,21 @@ def star_function(function: AnyCallableT, arg: Any, arg_stars: int = 0) -> T:
 
 async def join_queue(q: Queue) -> None:
     await q.join()
+
+
+def tasks_str(num: int) -> str:
+    return "tasks" if num != 1 else "task"
+
+
+def get_first_doc_line(obj: object) -> str:
+    return getdoc(obj).strip().split("\n", 1)[0]
+
+
+async def return_or_exception(_function_to_execute: AnyCallableT, *args, **kwargs) -> Union[T, Exception]:
+    try:
+        if iscoroutinefunction(_function_to_execute):
+            return await _function_to_execute(*args, **kwargs)
+        else:
+            return _function_to_execute(*args, **kwargs)
+    except Exception as e:
+        return e

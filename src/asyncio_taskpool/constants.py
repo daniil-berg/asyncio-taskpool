@@ -20,10 +20,13 @@ Constants used by more than one module in the package.
 
 
 PACKAGE_NAME = 'asyncio_taskpool'
-MSG_BYTES = 1024
+MSG_BYTES = 1024000
+CMD = 'command'
+CMD_NAME = 'name'
+CMD_POOL_SIZE = 'pool-size'
+CMD_NUM_RUNNING = 'num-running'
 CMD_START = 'start'
 CMD_STOP = 'stop'
-CMD_STOP_ALL = 'stop_all'
-CMD_NUM_RUNNING = 'num_running'
-CMD_FUNC = 'func'
+CMD_STOP_ALL = 'stop-all'
+CMD_FUNC_NAME = 'func-name'
 CLIENT_EXIT = 'exit'

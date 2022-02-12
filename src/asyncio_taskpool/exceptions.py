@@ -49,3 +49,11 @@ class PoolStillUnlocked(PoolException):
 
 class NotCoroutine(PoolException):
     pass
+
+
+class ServerException(Exception):
+    pass
+
+
+class HelpRequested(ServerException):
+    pass

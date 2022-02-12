@@ -78,6 +78,7 @@ class BaseTaskPool:
         log.debug("%s initialized", str(self))
 
     def __str__(self) -> str:
+        """Returns the name of the task pool."""
         return f'{self.__class__.__name__}-{self._name or self._idx}'
 
     @property

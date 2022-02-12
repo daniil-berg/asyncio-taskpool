@@ -19,6 +19,8 @@ Classes of control clients for a simply interface to a task pool control server.
 """
 
 
+import json
+import shutil
 import sys
 from abc import ABC, abstractmethod
 from asyncio.streams import StreamReader, StreamWriter, open_unix_connection
@@ -34,9 +36,19 @@ class ControlClient(ABC):
     async def open_connection(self, **kwargs) -> ClientConnT:
         raise NotImplementedError
 
+    @staticmethod
+    def client_info() -> dict:
+        return {'width': shutil.get_terminal_size().columns}
+
     def __init__(self, **conn_kwargs) -> None:
         self._conn_kwargs = conn_kwargs
         self._connected: bool = False
+
+    async def _server_handshake(self, reader: StreamReader, writer: StreamWriter) -> None:
+        self._connected = True
+        writer.write(json.dumps(self.client_info()).encode())
+        await writer.drain()
+        print("Connected to", (await reader.read(constants.MSG_BYTES)).decode())
 
     async def _interact(self, reader: StreamReader, writer: StreamWriter) -> None:
         try:
@@ -64,8 +76,7 @@ class ControlClient(ABC):
         if reader is None:
             print("Failed to connect.", file=sys.stderr)
             return
-        self._connected = True
-        print("Connected to", (await reader.read(constants.MSG_BYTES)).decode())
+        await self._server_handshake(reader, writer)
         while self._connected:
             await self._interact(reader, writer)
         print("Disconnected from control server.")

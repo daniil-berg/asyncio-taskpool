@@ -86,3 +86,11 @@ class HelpersTestCase(IsolatedAsyncioTestCase):
         mock_queue = MagicMock(join=mock_join)
         self.assertIsNone(await helpers.join_queue(mock_queue))
         mock_join.assert_awaited_once_with()
+
+    def test_task_str(self):
+        self.assertEqual("task", helpers.tasks_str(1))
+        self.assertEqual("tasks", helpers.tasks_str(0))
+        self.assertEqual("tasks", helpers.tasks_str(-1))
+        self.assertEqual("tasks", helpers.tasks_str(2))
+        self.assertEqual("tasks", helpers.tasks_str(-10))
+        self.assertEqual("tasks", helpers.tasks_str(42))

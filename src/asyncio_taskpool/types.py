@@ -28,7 +28,7 @@ T = TypeVar('T')
 ArgsT = Iterable[Any]
 KwArgsT = Mapping[str, Any]
 
-AnyCallableT = Callable[[...], Union[Awaitable[T], T]]
+AnyCallableT = Callable[[...], Union[T, Awaitable[T]]]
 CoroutineFunc = Callable[[...], Awaitable[Any]]
 
 EndCallbackT = Callable
