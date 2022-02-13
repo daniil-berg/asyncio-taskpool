@@ -14,7 +14,7 @@ If you need control over a task pool at runtime, you can launch an asynchronous 
 
 ## Usage
 
-Generally speaking, a task is added to a pool by providing it with a coroutine function reference as well as the arguments for that function. Here is what that could look like:
+Generally speaking, a task is added to a pool by providing it with a coroutine function reference as well as the arguments for that function. Here is what that could look like in the most simplified form:
 ```python
 from asyncio_taskpool import SimpleTaskPool
 ...
