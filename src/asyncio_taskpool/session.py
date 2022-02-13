@@ -142,15 +142,11 @@ class ControlSession:
 
     async def _parse_command(self, msg: str) -> None:
         try:
-            args, argv = self._parser.parse_known_args(msg.split(' '))
+            args = self._parser.parse_args(msg.split(' '))
         except ArgumentError as e:
             self._writer.write(str(e).encode())
             return
         except HelpRequested:
-            return
-        if argv:
-            log.debug("%s sent unknown arguments: %s", self._client_class_name, msg)
-            self._writer.write(b"Invalid command!")
             return
         await self._execute_command(args)
 
