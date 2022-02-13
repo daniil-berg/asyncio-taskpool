@@ -19,7 +19,6 @@ Miscellaneous helper functions.
 """
 
 
-import re
 from asyncio.coroutines import iscoroutinefunction
 from asyncio.queues import Queue
 from inspect import getdoc
@@ -57,7 +56,7 @@ def tasks_str(num: int) -> str:
 
 
 def get_first_doc_line(obj: object) -> str:
-    return getdoc(obj).strip().split("\n", 1)[0]
+    return getdoc(obj).strip().split("\n", 1)[0].strip()
 
 
 async def return_or_exception(_function_to_execute: AnyCallableT, *args, **kwargs) -> Union[T, Exception]:
