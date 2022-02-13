@@ -26,8 +26,8 @@ from abc import ABC, abstractmethod
 from asyncio.streams import StreamReader, StreamWriter, open_unix_connection
 from pathlib import Path
 
-from asyncio_taskpool import constants
-from asyncio_taskpool.types import ClientConnT
+from .constants import CLIENT_EXIT, CLIENT_INFO, SESSION_MSG_BYTES
+from .types import ClientConnT
 
 
 class ControlClient(ABC):
@@ -38,7 +38,7 @@ class ControlClient(ABC):
 
     @staticmethod
     def client_info() -> dict:
-        return {'width': shutil.get_terminal_size().columns}
+        return {CLIENT_INFO.TERMINAL_WIDTH: shutil.get_terminal_size().columns}
 
     def __init__(self, **conn_kwargs) -> None:
         self._conn_kwargs = conn_kwargs
@@ -48,17 +48,17 @@ class ControlClient(ABC):
         self._connected = True
         writer.write(json.dumps(self.client_info()).encode())
         await writer.drain()
-        print("Connected to", (await reader.read(constants.MSG_BYTES)).decode())
+        print("Connected to", (await reader.read(SESSION_MSG_BYTES)).decode())
 
     async def _interact(self, reader: StreamReader, writer: StreamWriter) -> None:
         try:
             msg = input("> ").strip().lower()
         except EOFError:
-            msg = constants.CLIENT_EXIT
+            msg = CLIENT_EXIT
         except KeyboardInterrupt:
             print()
             return
-        if msg == constants.CLIENT_EXIT:
+        if msg == CLIENT_EXIT:
             writer.close()
             self._connected = False
             return
@@ -69,7 +69,7 @@ class ControlClient(ABC):
             self._connected = False
             print(e, file=sys.stderr)
             return
-        print((await reader.read(constants.MSG_BYTES)).decode())
+        print((await reader.read(SESSION_MSG_BYTES)).decode())
 
     async def start(self):
         reader, writer = await self.open_connection(**self._conn_kwargs)
