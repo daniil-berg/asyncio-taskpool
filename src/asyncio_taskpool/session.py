@@ -5,9 +5,9 @@ from asyncio.streams import StreamReader, StreamWriter
 from typing import Callable, Optional, Union, TYPE_CHECKING
 
 from .constants import CMD, SESSION_PARSER_WRITER, SESSION_MSG_BYTES, CLIENT_INFO
-from .exceptions import HelpRequested
+from .exceptions import HelpRequested, NotATaskPool, UnknownTaskPoolClass
 from .helpers import get_first_doc_line, return_or_exception, tasks_str
-from .pool import TaskPool, SimpleTaskPool
+from .pool import BaseTaskPool, TaskPool, SimpleTaskPool
 from .session_parser import CommandParser, NUM
 
 if TYPE_CHECKING:
@@ -67,6 +67,9 @@ class ControlSession:
             CMD.FUNC_NAME, short_help=get_first_doc_line(self._pool.__class__.func_name.fget)
         )
 
+    def _add_advanced_commands(self) -> None:
+        raise NotImplementedError
+
     def _init_parser(self, client_terminal_width: int) -> None:
         parser_kwargs = {
             'prog': '',
@@ -76,9 +79,13 @@ class ControlSession:
         self._parser = CommandParser(**parser_kwargs)
         self._add_base_commands()
         if isinstance(self._pool, TaskPool):
-            pass  # TODO
+            self._add_advanced_commands()
         elif isinstance(self._pool, SimpleTaskPool):
             self._add_simple_commands()
+        elif isinstance(self._pool, BaseTaskPool):
+            raise UnknownTaskPoolClass(f"No interface defined for {self._pool.__class__.__name__}")
+        else:
+            raise NotATaskPool(f"Not a task pool instance: {self._pool}")
 
     async def client_handshake(self) -> None:
         client_info = json.loads((await self._reader.read(SESSION_MSG_BYTES)).decode().strip())

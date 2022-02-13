@@ -55,5 +55,13 @@ class ServerException(Exception):
     pass
 
 
+class UnknownTaskPoolClass(ServerException):
+    pass
+
+
+class NotATaskPool(ServerException):
+    pass
+
+
 class HelpRequested(ServerException):
     pass
