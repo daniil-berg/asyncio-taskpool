@@ -34,4 +34,5 @@ CoroutineFunc = Callable[[...], Awaitable[Any]]
 EndCallbackT = Callable
 CancelCallbackT = Callable
 
+ConnectedCallbackT = Callable[[StreamReader, StreamWriter], Awaitable[None]]
 ClientConnT = Union[Tuple[StreamReader, StreamWriter], Tuple[None, None]]
