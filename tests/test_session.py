@@ -25,7 +25,7 @@ from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
 from asyncio_taskpool import session
-from asyncio_taskpool.constants import CLIENT_INFO, CMD, SESSION_MSG_BYTES, SESSION_PARSER_WRITER
+from asyncio_taskpool.constants import CLIENT_INFO, CMD, SESSION_MSG_BYTES, SESSION_WRITER
 from asyncio_taskpool.exceptions import HelpRequested, NotATaskPool, UnknownTaskPoolClass
 from asyncio_taskpool.pool import BaseTaskPool, TaskPool, SimpleTaskPool
 
@@ -119,7 +119,7 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         width = 1234
         expected_parser_kwargs = {
             'prog': '',
-            SESSION_PARSER_WRITER: self.mock_writer,
+            SESSION_WRITER: self.mock_writer,
             CLIENT_INFO.TERMINAL_WIDTH: width,
         }
         self.assertIsNone(self.session._init_parser(width))

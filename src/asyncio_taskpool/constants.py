@@ -24,7 +24,7 @@ PACKAGE_NAME = 'asyncio_taskpool'
 CLIENT_EXIT = 'exit'
 
 SESSION_MSG_BYTES = 1024 * 100
-SESSION_PARSER_WRITER = 'session_writer'
+SESSION_WRITER = 'session_writer'
 
 
 class CLIENT_INFO:

@@ -25,7 +25,7 @@ from argparse import ArgumentError, HelpFormatter
 from asyncio.streams import StreamReader, StreamWriter
 from typing import Callable, Optional, Union, TYPE_CHECKING
 
-from .constants import CMD, SESSION_PARSER_WRITER, SESSION_MSG_BYTES, CLIENT_INFO
+from .constants import CMD, SESSION_WRITER, SESSION_MSG_BYTES, CLIENT_INFO
 from .exceptions import HelpRequested, NotATaskPool, UnknownTaskPoolClass
 from .helpers import get_first_doc_line, return_or_exception, tasks_str
 from .pool import BaseTaskPool, TaskPool, SimpleTaskPool
@@ -166,7 +166,7 @@ class ControlSession:
         """
         parser_kwargs = {
             'prog': '',
-            SESSION_PARSER_WRITER: self._writer,
+            SESSION_WRITER: self._writer,
             CLIENT_INFO.TERMINAL_WIDTH: client_terminal_width,
         }
         self._parser = CommandParser(**parser_kwargs)
