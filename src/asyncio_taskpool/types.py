@@ -20,6 +20,7 @@ Custom type definitions used in various modules.
 
 
 from asyncio.streams import StreamReader, StreamWriter
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Iterable, Mapping, Tuple, TypeVar, Union
 
 
@@ -36,3 +37,5 @@ CancelCallbackT = Callable
 
 ConnectedCallbackT = Callable[[StreamReader, StreamWriter], Awaitable[None]]
 ClientConnT = Union[Tuple[StreamReader, StreamWriter], Tuple[None, None]]
+
+PathT = Union[Path, str]
