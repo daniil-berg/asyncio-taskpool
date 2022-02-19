@@ -130,7 +130,7 @@ async def main() -> None:
     # **only** once there is room in the pool **and** no more than one of these last four tasks is running.
     args_list = [(0, 10), (10, 20), (20, 30), (30, 40)]
     print("Calling `starmap`...")
-    await pool.starmap(other_work, args_list, num_tasks=2)
+    await pool.starmap(other_work, args_list, group_size=2)
     print("`starmap` returned")
     # Now we lock the pool, so that we can safely await all our tasks.
     pool.lock()

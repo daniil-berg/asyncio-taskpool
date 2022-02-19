@@ -558,19 +558,19 @@ class TaskPoolTestCase(CommonTestCase):
         mock_event_cls.return_value = mock_flag = MagicMock(set=mock_flag_set)
 
         mock_func, stars = MagicMock(), 3
-        args_iter, num_tasks = (FOO, BAR, 1, 2, 3), 2
+        args_iter, group_size = (FOO, BAR, 1, 2, 3), 2
         end_cb, cancel_cb = MagicMock(), MagicMock()
 
         self.task_pool._locked = False
         with self.assertRaises(exceptions.PoolIsLocked):
-            await self.task_pool._map(mock_func, args_iter, stars, num_tasks, end_cb, cancel_cb)
+            await self.task_pool._map(mock_func, args_iter, stars, group_size, end_cb, cancel_cb)
         mock__set_up_args_queue.assert_not_called()
         mock__queue_consumer.assert_not_awaited()
         mock_flag_set.assert_not_called()
 
         self.task_pool._locked = True
-        self.assertIsNone(await self.task_pool._map(mock_func, args_iter, stars, num_tasks, end_cb, cancel_cb))
-        mock__set_up_args_queue.assert_called_once_with(args_iter, num_tasks)
+        self.assertIsNone(await self.task_pool._map(mock_func, args_iter, stars, group_size, end_cb, cancel_cb))
+        mock__set_up_args_queue.assert_called_once_with(args_iter, group_size)
         mock__queue_consumer.assert_has_awaits(qsize * [call(mock_q, mock_flag, mock_func, arg_stars=stars,
                                                              end_callback=end_cb, cancel_callback=cancel_cb)])
         mock_flag_set.assert_called_once_with()
@@ -578,28 +578,28 @@ class TaskPoolTestCase(CommonTestCase):
     @patch.object(pool.TaskPool, '_map')
     async def test_map(self, mock__map: AsyncMock):
         mock_func = MagicMock()
-        arg_iter, num_tasks = (FOO, BAR, 1, 2, 3), 2
+        arg_iter, group_size = (FOO, BAR, 1, 2, 3), 2
         end_cb, cancel_cb = MagicMock(), MagicMock()
-        self.assertIsNone(await self.task_pool.map(mock_func, arg_iter, num_tasks, end_cb, cancel_cb))
-        mock__map.assert_awaited_once_with(mock_func, arg_iter, arg_stars=0, num_tasks=num_tasks,
+        self.assertIsNone(await self.task_pool.map(mock_func, arg_iter, group_size, end_cb, cancel_cb))
+        mock__map.assert_awaited_once_with(mock_func, arg_iter, arg_stars=0, group_size=group_size,
                                            end_callback=end_cb, cancel_callback=cancel_cb)
 
     @patch.object(pool.TaskPool, '_map')
     async def test_starmap(self, mock__map: AsyncMock):
         mock_func = MagicMock()
-        args_iter, num_tasks = ([FOO], [BAR]), 2
+        args_iter, group_size = ([FOO], [BAR]), 2
         end_cb, cancel_cb = MagicMock(), MagicMock()
-        self.assertIsNone(await self.task_pool.starmap(mock_func, args_iter, num_tasks, end_cb, cancel_cb))
-        mock__map.assert_awaited_once_with(mock_func, args_iter, arg_stars=1, num_tasks=num_tasks,
+        self.assertIsNone(await self.task_pool.starmap(mock_func, args_iter, group_size, end_cb, cancel_cb))
+        mock__map.assert_awaited_once_with(mock_func, args_iter, arg_stars=1, group_size=group_size,
                                            end_callback=end_cb, cancel_callback=cancel_cb)
 
     @patch.object(pool.TaskPool, '_map')
     async def test_doublestarmap(self, mock__map: AsyncMock):
         mock_func = MagicMock()
-        kwargs_iter, num_tasks = [{'a': FOO}, {'a': BAR}], 2
+        kwargs_iter, group_size = [{'a': FOO}, {'a': BAR}], 2
         end_cb, cancel_cb = MagicMock(), MagicMock()
-        self.assertIsNone(await self.task_pool.doublestarmap(mock_func, kwargs_iter, num_tasks, end_cb, cancel_cb))
-        mock__map.assert_awaited_once_with(mock_func, kwargs_iter, arg_stars=2, num_tasks=num_tasks,
+        self.assertIsNone(await self.task_pool.doublestarmap(mock_func, kwargs_iter, group_size, end_cb, cancel_cb))
+        mock__map.assert_awaited_once_with(mock_func, kwargs_iter, arg_stars=2, group_size=group_size,
                                            end_callback=end_cb, cancel_callback=cancel_cb)
 
 
