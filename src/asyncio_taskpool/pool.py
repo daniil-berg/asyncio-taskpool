@@ -32,19 +32,22 @@ For further details about the classes check their respective docstrings.
 
 
 import logging
-from asyncio import gather
 from asyncio.coroutines import iscoroutine, iscoroutinefunction
 from asyncio.exceptions import CancelledError
-from asyncio.locks import Event, Semaphore
-from asyncio.queues import Queue, QueueEmpty
-from asyncio.tasks import Task, create_task
-from functools import partial
+from asyncio.locks import Semaphore
+from asyncio.queues import QueueEmpty
+from asyncio.tasks import Task, create_task, gather
+from contextlib import suppress
+from datetime import datetime
 from math import inf
-from typing import Any, Awaitable, Dict, Iterable, Iterator, List
+from typing import Any, Awaitable, Dict, Iterable, Iterator, List, Set
 
 from . import exceptions
+from .constants import DEFAULT_TASK_GROUP, DATETIME_FORMAT
+from .group_register import TaskGroupRegister
 from .helpers import execute_optional, star_function, join_queue
-from .types import ArgsT, KwArgsT, CoroutineFunc, EndCallbackT, CancelCallbackT
+from .queue_context import Queue
+from .types import ArgsT, KwArgsT, CoroutineFunc, EndCB, CancelCB
 
 
 log = logging.getLogger(__name__)
@@ -62,19 +65,30 @@ class BaseTaskPool:
 
     def __init__(self, pool_size: int = inf, name: str = None) -> None:
         """Initializes the necessary internal attributes and adds the new pool to the general pools list."""
-        self._enough_room: Semaphore = Semaphore()
-        self.pool_size = pool_size
+        # Initialize a counter for the total number of tasks started through the pool and one for the total number of
+        # tasks cancelled through the pool.
+        self._num_started: int = 0
+        self._num_cancellations: int = 0
+
+        # Initialize flags; immutably set the name.
         self._locked: bool = False
-        self._counter: int = 0
-        self._running: Dict[int, Task] = {}
-        self._cancelled: Dict[int, Task] = {}
-        self._ended: Dict[int, Task] = {}
-        self._num_cancelled: int = 0
-        self._num_ended: int = 0
-        self._idx: int = self._add_pool(self)
+        self._closed: bool = False
         self._name: str = name
+
+        # The following three dictionaries are the actual containers of the tasks controlled by the pool.
+        self._tasks_running: Dict[int, Task] = {}
+        self._tasks_cancelled: Dict[int, Task] = {}
+        self._tasks_ended: Dict[int, Task] = {}
+
+        # These next three attributes act as synchronisation primitives necessary for managing the pool.
         self._before_gathering: List[Awaitable] = []
-        self._interrupt_flag: Event = Event()
+        self._enough_room: Semaphore = Semaphore()
+        self._task_groups: Dict[str, TaskGroupRegister[int]] = {}
+
+        # Finish with method/functions calls that add the pool to the internal list of pools, set its initial size,
+        # and issue a log message.
+        self._idx: int = self._add_pool(self)
+        self.pool_size = pool_size
         log.debug("%s initialized", str(self))
 
     def __str__(self) -> str:
@@ -125,34 +139,36 @@ class BaseTaskPool:
     def num_running(self) -> int:
         """
         Returns the number of tasks in the pool that are (at that moment) still running.
-        At the moment a task's `end_callback` is fired, it is no longer considered to be running.
+
+        At the moment a task's `end_callback` or `cancel_callback` is fired, it is no longer considered running.
         """
-        return len(self._running)
+        return len(self._tasks_running)
 
     @property
-    def num_cancelled(self) -> int:
+    def num_cancellations(self) -> int:
         """
         Returns the number of tasks in the pool that have been cancelled through the pool (up until that moment).
-        At the moment a task's `cancel_callback` is fired, it is considered cancelled and no longer running.
+
+        At the moment a task's `cancel_callback` is fired, this counts as a cancellation, and the task is then
+        considered cancelled (instead of running) until its `end_callback` is fired.
         """
-        return self._num_cancelled
+        return self._num_cancellations
 
     @property
     def num_ended(self) -> int:
         """
         Returns the number of tasks started through the pool that have stopped running (up until that moment).
-        At the moment a task's `end_callback` is fired, it is considered ended.
+
+        At the moment a task's `end_callback` is fired, it is considered ended and no longer running (or cancelled).
         When a task is cancelled, it is not immediately considered ended; only after its `cancel_callback` has returned,
         does it then actually end.
         """
-        return self._num_ended
+        return len(self._tasks_ended)
 
     @property
     def num_finished(self) -> int:
-        """
-        Returns the number of tasks in the pool that have actually finished running (without having been cancelled).
-        """
-        return self._num_ended - self._num_cancelled + len(self._cancelled)
+        """Returns the number of tasks in the pool that have finished running (without having been cancelled)."""
+        return len(self._tasks_ended) - self._num_cancellations + len(self._tasks_cancelled)
 
     @property
     def is_full(self) -> bool:
@@ -162,14 +178,61 @@ class BaseTaskPool:
         """
         return self._enough_room.locked()
 
-    # TODO: Consider adding task group names
+    def get_task_group_ids(self, group_name: str) -> Set[int]:
+        """
+        Returns the set of IDs of all tasks in the specified group.
+
+        Args:
+            group_name: Must be a name of a task group that exists within the pool.
+
+        Returns:
+            Set of integers representing the task IDs belonging to the specified group.
+
+        Raises:
+            `InvalidGroupName` if no task group named `group_name` exists in the pool.
+        """
+        try:
+            return set(self._task_groups[group_name])
+        except KeyError:
+            raise exceptions.InvalidGroupName(f"No task group named {group_name} exists in this pool.")
+
+    def _check_start(self, *, awaitable: Awaitable = None, function: CoroutineFunc = None,
+                     ignore_lock: bool = False) -> None:
+        """
+        Checks necessary conditions for starting a task (group) in the pool.
+
+        Either something that is expected to be a coroutine (i.e. awaitable) or something that is expected to be a
+        coroutine _function_ will be checked.
+
+        Args:
+            awaitable: If this is passed, `function` must be `None`.
+            function: If this is passed, `awaitable` must be `None`.
+            ignore_lock (optional): If `True`, a locked pool will produce no error here.
+
+        Raises:
+            `AssertionError` if both or neither of `awaitable` and `function` were passed.
+            `asyncio_taskpool.exceptions.PoolIsClosed` if the pool is closed.
+            `asyncio_taskpool.exceptions.NotCoroutine` if `awaitable` is not a cor. / `function` not a cor. func.
+            `asyncio_taskpool.exceptions.PoolIsLocked` if the pool has been locked and `ignore_lock` is `False`.
+        """
+        assert (awaitable is None) != (function is None)
+        if awaitable and not iscoroutine(awaitable):
+            raise exceptions.NotCoroutine(f"Not awaitable: {awaitable}")
+        if function and not iscoroutinefunction(function):
+            raise exceptions.NotCoroutine(f"Not a coroutine function: {function}")
+        if self._closed:
+            raise exceptions.PoolIsClosed("You must use another pool")
+        if self._locked and not ignore_lock:
+            raise exceptions.PoolIsLocked("Cannot start new tasks")
+
     def _task_name(self, task_id: int) -> str:
         """Returns a standardized name for a task with a specific `task_id`."""
         return f'{self}_Task-{task_id}'
 
-    async def _task_cancellation(self, task_id: int, custom_callback: CancelCallbackT = None) -> None:
+    async def _task_cancellation(self, task_id: int, custom_callback: CancelCB = None) -> None:
         """
         Universal callback to be run upon any task in the pool being cancelled.
+
         Required for keeping track of running/cancelled tasks and proper logging.
 
         Args:
@@ -180,14 +243,15 @@ class BaseTaskPool:
                 It is run at the end of this function with the `task_id` as its only positional argument.
         """
         log.debug("Cancelling %s ...", self._task_name(task_id))
-        self._cancelled[task_id] = self._running.pop(task_id)
-        self._num_cancelled += 1
+        self._tasks_cancelled[task_id] = self._tasks_running.pop(task_id)
+        self._num_cancellations += 1
         log.debug("Cancelled %s", self._task_name(task_id))
         await execute_optional(custom_callback, args=(task_id,))
 
-    async def _task_ending(self, task_id: int, custom_callback: EndCallbackT = None) -> None:
+    async def _task_ending(self, task_id: int, custom_callback: EndCB = None) -> None:
         """
         Universal callback to be run upon any task in the pool ending its work.
+
         Required for keeping track of running/cancelled/ended tasks and proper logging.
         Also releases room in the task pool for potentially waiting tasks.
 
@@ -199,19 +263,20 @@ class BaseTaskPool:
                 It is run at the end of this function with the `task_id` as its only positional argument.
         """
         try:
-            self._ended[task_id] = self._running.pop(task_id)
+            self._tasks_ended[task_id] = self._tasks_running.pop(task_id)
         except KeyError:
-            self._ended[task_id] = self._cancelled.pop(task_id)
-        self._num_ended += 1
+            self._tasks_ended[task_id] = self._tasks_cancelled.pop(task_id)
         self._enough_room.release()
         log.info("Ended %s", self._task_name(task_id))
         await execute_optional(custom_callback, args=(task_id,))
 
-    async def _task_wrapper(self, awaitable: Awaitable, task_id: int, end_callback: EndCallbackT = None,
-                            cancel_callback: CancelCallbackT = None) -> Any:
+    async def _task_wrapper(self, awaitable: Awaitable, task_id: int, end_callback: EndCB = None,
+                            cancel_callback: CancelCB = None) -> Any:
         """
-        Universal wrapper around every task to be run in the pool.
-        Returns/raises whatever the wrapped coroutine does.
+        Universal wrapper around every task run in the pool that returns/raises whatever the wrapped coroutine does.
+
+        Responsible for catching cancellation and awaiting the `_task_cancellation` callback, as well as for awaiting
+        the `_task_ending` callback, after the coroutine returns or raises an exception.
 
         Args:
             awaitable:
@@ -233,16 +298,19 @@ class BaseTaskPool:
         finally:
             await self._task_ending(task_id, custom_callback=end_callback)
 
-    async def _start_task(self, awaitable: Awaitable, ignore_lock: bool = False, end_callback: EndCallbackT = None,
-                          cancel_callback: CancelCallbackT = None) -> int:
+    async def _start_task(self, awaitable: Awaitable, group_name: str = DEFAULT_TASK_GROUP, ignore_lock: bool = False,
+                          end_callback: EndCB = None, cancel_callback: CancelCB = None) -> int:
         """
         Starts a coroutine as a new task in the pool.
-        This method blocks, **only if** the pool is full.
-        Returns/raises whatever the wrapped coroutine does.
+
+        This method can block for a significant amount of time, **only if** the pool is full.
+        Otherwise it merely needs to acquire the `TaskGroupRegister` lock, which should never be held for a long time.
 
         Args:
             awaitable:
                 The actual coroutine to be run within the task pool.
+            group_name (optional):
+                Name of the task group to add the new task to; defaults to the `DEFAULT_TASK_GROUP` constant.
             ignore_lock (optional):
                 If `True`, even if the pool is locked, the task will still be started.
             end_callback (optional):
@@ -252,25 +320,20 @@ class BaseTaskPool:
                 A callback to execute after cancellation of the task.
                 It is run with the task's ID as its only positional argument.
 
-        Raises:
-            `asyncio_taskpool.exceptions.NotCoroutine` if `awaitable` is not a coroutine.
-            `asyncio_taskpool.exceptions.PoolIsLocked` if the pool has been locked and `ignore_lock` is `False`.
+        Returns:
+            The ID of the newly started task.
         """
-        if not iscoroutine(awaitable):
-            raise exceptions.NotCoroutine(f"Not awaitable: {awaitable}")
-        if self._locked and not ignore_lock:
-            raise exceptions.PoolIsLocked("Cannot start new tasks")
+        self._check_start(awaitable=awaitable, ignore_lock=ignore_lock)
         await self._enough_room.acquire()
-        task_id = self._counter
-        self._counter += 1
-        try:
-            self._running[task_id] = create_task(
-                self._task_wrapper(awaitable, task_id, end_callback, cancel_callback),
+        group_reg = self._task_groups.setdefault(group_name, TaskGroupRegister())
+        async with group_reg:
+            task_id = self._num_started
+            self._num_started += 1
+            group_reg.add(task_id)
+            self._tasks_running[task_id] = create_task(
+                coro=self._task_wrapper(awaitable, task_id, end_callback, cancel_callback),
                 name=self._task_name(task_id)
             )
-        except Exception as e:
-            self._enough_room.release()
-            raise e
         return task_id
 
     def _get_running_task(self, task_id: int) -> Task:
@@ -286,11 +349,11 @@ class BaseTaskPool:
             `asyncio_taskpool.exceptions.InvalidTaskID` if no task with `task_id` is known to the pool.
         """
         try:
-            return self._running[task_id]
+            return self._tasks_running[task_id]
         except KeyError:
-            if self._cancelled.get(task_id):
-                raise exceptions.AlreadyCancelled(f"{self._task_name(task_id)} has already been cancelled")
-            if self._ended.get(task_id):
+            if self._tasks_cancelled.get(task_id):
+                raise exceptions.AlreadyCancelled(f"{self._task_name(task_id)} has been cancelled")
+            if self._tasks_ended.get(task_id):
                 raise exceptions.AlreadyEnded(f"{self._task_name(task_id)} has finished running")
             raise exceptions.InvalidTaskID(f"No task with ID {task_id} found in {self}")
 
@@ -303,91 +366,111 @@ class BaseTaskPool:
         - `AlreadyCancelled` if one of the `task_ids` belongs to a task that has been (recently) cancelled.
         - `AlreadyEnded` if one of the `task_ids` belongs to a task that has ended (recently).
         - `InvalidTaskID` if any of the `task_ids` is not known to the pool.
-        Note that once a pool has been flushed, any IDs of tasks that have ended previously will be forgotten.
+        Note that once a pool has been flushed (see below), IDs of tasks that have ended previously will be forgotten.
 
         Args:
-            task_ids:
-                Arbitrary number of integers. Each must be an ID of a task still running within the pool.
-            msg (optional):
-                Passed to the `Task.cancel()` method of every task specified by the `task_ids`.
+            task_ids: Arbitrary number of integers. Each must be an ID of a task still running within the pool.
+            msg (optional): Passed to the `Task.cancel()` method of every task specified by the `task_ids`.
         """
         tasks = [self._get_running_task(task_id) for task_id in task_ids]
         for task in tasks:
             task.cancel(msg=msg)
 
-    def cancel_all(self, msg: str = None) -> None:
+    def _cancel_and_remove_all_from_group(self, group_name: str, group_reg: TaskGroupRegister, msg: str = None) -> None:
+        """
+        Removes all tasks from the specified group and cancels them, if they are still running.
+
+        Args:
+            group_name: The name of the group of tasks that shall be cancelled.
+            group_reg: The task group register object containing the task IDs.
+            msg (optional): Passed to the `Task.cancel()` method of every task specified by the `task_ids`.
+        """
+        while group_reg:
+            try:
+                self._tasks_running[group_reg.pop()].cancel(msg=msg)
+            except KeyError:
+                continue
+        log.debug("%s cancelled tasks from group %s", str(self), group_name)
+
+    async def cancel_group(self, group_name: str, msg: str = None) -> None:
+        """
+        Cancels an entire group of tasks. The task group is subsequently forgotten by the pool.
+
+        Args:
+            group_name: The name of the group of tasks that shall be cancelled.
+            msg (optional): Passed to the `Task.cancel()` method of every task specified by the `task_ids`.
+
+        Raises:
+            `InvalidGroupName` if no task group named `group_name` exists in the pool.
+        """
+        log.debug("%s cancelling tasks in group %s", str(self), group_name)
+        try:
+            group_reg = self._task_groups.pop(group_name)
+        except KeyError:
+            raise exceptions.InvalidGroupName(f"No task group named {group_name} exists in this pool.")
+        async with group_reg:
+            self._cancel_and_remove_all_from_group(group_name, group_reg, msg=msg)
+        log.debug("%s forgot task group %s", str(self), group_name)
+
+    async def cancel_all(self, msg: str = None) -> None:
         """
         Cancels all tasks still running within the pool.
 
-        Note that there may be an unknown number of coroutine functions already "queued" to be run as tasks.
-        This can happen, if for example the `TaskPool.map` method was called with `group_size` set to a number smaller
-        than the number of arguments from `args_iter`.
-        In this case, those already running will be cancelled, while the following will **never even start**.
-
         Args:
-            msg (optional):
-                Passed to the `Task.cancel()` method of every task specified by the `task_ids`.
+            msg (optional): Passed to the `Task.cancel()` method of every task specified by the `task_ids`.
         """
         log.warning("%s cancelling all tasks!", str(self))
-        self._interrupt_flag.set()
-        for task in self._running.values():
-            task.cancel(msg=msg)
+        while self._task_groups:
+            group_name, group_reg = self._task_groups.popitem()
+            async with group_reg:
+                self._cancel_and_remove_all_from_group(group_name, group_reg, msg=msg)
 
     async def flush(self, return_exceptions: bool = False):
         """
-        Calls `asyncio.gather` on all ended/cancelled tasks from the pool, returns their results, and forgets the tasks.
+        Calls `asyncio.gather` on all ended/cancelled tasks from the pool, and forgets the tasks.
+
+        This method exists mainly to free up memory of unneeded `Task` objects.
+
         This method blocks, **only if** any of the tasks block while catching a `asyncio.CancelledError` or any of the
         callbacks registered for the tasks block.
 
         Args:
             return_exceptions (optional): Passed directly into `gather`.
         """
-        results = await gather(*self._ended.values(), *self._cancelled.values(), return_exceptions=return_exceptions)
-        self._ended.clear()
-        self._cancelled.clear()
-        if self._interrupt_flag.is_set():
-            self._interrupt_flag.clear()
-        return results
+        await gather(*self._tasks_ended.values(), *self._tasks_cancelled.values(), return_exceptions=return_exceptions)
+        self._tasks_ended.clear()
+        self._tasks_cancelled.clear()
 
-    async def gather(self, return_exceptions: bool = False):
+    async def gather_and_close(self, return_exceptions: bool = False):
         """
-        Calls `asyncio.gather` on **all** tasks from the pool, returns their results, and forgets the tasks.
+        Calls `asyncio.gather` on **all** tasks in the pool, then permanently closes the pool.
 
         The `lock()` method must have been called prior to this.
 
-        Note that there may be an unknown number of coroutine functions already "queued" to be run as tasks.
-        This can happen, if for example the `TaskPool.map` method was called with `group_size` set to a number smaller
-        than the number of arguments from `args_iter`.
-        In this case, calling `cancel_all()` prior to this, will prevent those tasks from starting and potentially
-        blocking this method. Otherwise it will wait until they all have started.
-
-        This method may also block, if any task blocks while catching a `asyncio.CancelledError` or if any of the
-        callbacks registered for a task blocks.
+        This method may block, if one of the tasks blocks while catching a `asyncio.CancelledError` or if any of the
+        callbacks registered for a task blocks for whatever reason.
 
         Args:
             return_exceptions (optional): Passed directly into `gather`.
 
         Raises:
-            `asyncio_taskpool.exceptions.PoolStillUnlocked` if the pool has not been locked yet.
+            `PoolStillUnlocked` if the pool has not been locked yet.
         """
         if not self._locked:
             raise exceptions.PoolStillUnlocked("Pool must be locked, before tasks can be gathered")
         await gather(*self._before_gathering)
-        results = await gather(*self._ended.values(), *self._cancelled.values(), *self._running.values(),
-                               return_exceptions=return_exceptions)
-        self._ended.clear()
-        self._cancelled.clear()
-        self._running.clear()
+        await gather(*self._tasks_ended.values(), *self._tasks_cancelled.values(), *self._tasks_running.values(),
+                     return_exceptions=return_exceptions)
+        self._tasks_ended.clear()
+        self._tasks_cancelled.clear()
+        self._tasks_running.clear()
         self._before_gathering.clear()
-        if self._interrupt_flag.is_set():
-            self._interrupt_flag.clear()
-        return results
+        self._closed = True
 
 
 class TaskPool(BaseTaskPool):
     """
-    General task pool class.
-    Attempts to somewhat emulate part of the interface of `multiprocessing.pool.Pool` from the stdlib.
+    General task pool class. Attempts to emulate part of the interface of `multiprocessing.pool.Pool` from the stdlib.
 
     A `TaskPool` instance can manage an arbitrary number of concurrent tasks from any coroutine function.
     Tasks in the pool can all belong to the same coroutine function,
@@ -399,41 +482,187 @@ class TaskPool(BaseTaskPool):
     Adding tasks blocks **only if** the pool is full at that moment.
     """
 
-    async def _apply_one(self, func: CoroutineFunc, args: ArgsT = (), kwargs: KwArgsT = None,
-                         end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> int:
+    _QUEUE_END_SENTINEL = object()
+
+    def __init__(self, pool_size: int = inf, name: str = None) -> None:
+        super().__init__(pool_size=pool_size, name=name)
+        # In addition to all the attributes of the base class, we need a dictionary mapping task group names to sets of
+        # meta tasks that are/were running in the context of that group, and a bucked for cancelled meta tasks.
+        self._group_meta_tasks_running: Dict[str, Set[Task]] = {}
+        self._meta_tasks_cancelled: Set[Task] = set()
+
+    def _cancel_group_meta_tasks(self, group_name: str) -> None:
+        """Cancels and forgets all meta tasks associated with the task group named `group_name`."""
+        try:
+            meta_tasks = self._group_meta_tasks_running.pop(group_name)
+        except KeyError:
+            return
+        for meta_task in meta_tasks:
+            meta_task.cancel()
+        self._meta_tasks_cancelled.update(meta_tasks)
+        log.debug("%s cancelled and forgot meta tasks from group %s", str(self), group_name)
+
+    def _cancel_and_remove_all_from_group(self, group_name: str, group_reg: TaskGroupRegister, msg: str = None) -> None:
+        self._cancel_group_meta_tasks(group_name)
+        super()._cancel_and_remove_all_from_group(group_name, group_reg, msg=msg)
+
+    async def cancel_group(self, group_name: str, msg: str = None) -> None:
+        """
+        Cancels an entire group of tasks. The task group is subsequently forgotten by the pool.
+
+        If any methods such as `map()` launched meta tasks belonging to that group, these meta tasks are cancelled
+        before the actual tasks are cancelled. This means that any tasks "queued" to be started by a meta task will
+        **never even start**. In the case of `map()` this would mean that the `arg_iter` may be abandoned before it
+        was fully consumed (if that is even possible).
+
+        Args:
+            group_name: The name of the group of tasks (and meta tasks) that shall be cancelled.
+            msg (optional): Passed to the `Task.cancel()` method of every task specified by the `task_ids`.
+
+        Raises:
+            `InvalidGroupName` if no task group named `group_name` exists in the pool.
+        """
+        await super().cancel_group(group_name=group_name, msg=msg)
+
+    async def cancel_all(self, msg: str = None) -> None:
+        """
+        Cancels all tasks still running within the pool. (This includes all meta tasks.)
+
+        If any methods such as `map()` launched meta tasks, these meta tasks are cancelled before the actual tasks are
+        cancelled. This means that any tasks "queued" to be started by a meta task will **never even start**. In the
+        case of `map()` this would mean that the `arg_iter` may be abandoned before it was fully consumed (if that is
+        even possible).
+
+        Args:
+            msg (optional): Passed to the `Task.cancel()` method of every task specified by the `task_ids`.
+        """
+        await super().cancel_all(msg=msg)
+
+    def _pop_ended_meta_tasks(self) -> Set[Task]:
+        """
+        Goes through all not-cancelled meta tasks, checks if they are done already, and returns those that are.
+
+        The internal `_group_meta_tasks_running` dictionary is updated accordingly, i.e. after this method returns, the
+        values (sets) only contain meta tasks that were not done yet. In addition, names of groups that no longer
+        have any running meta tasks associated with them are removed from the keys.
+        """
+        obsolete_keys, ended_meta_tasks = [], set()
+        for group_name in self._group_meta_tasks_running.keys():
+            still_running = set()
+            while self._group_meta_tasks_running[group_name]:
+                meta_task = self._group_meta_tasks_running[group_name].pop()
+                if meta_task.done():
+                    ended_meta_tasks.add(meta_task)
+                else:
+                    still_running.add(meta_task)
+            if still_running:
+                self._group_meta_tasks_running[group_name] = still_running
+            else:
+                obsolete_keys.append(group_name)
+        # If a group no longer has running meta tasks associated with, we can remove its name from the dictionary.
+        for group_name in obsolete_keys:
+            del self._group_meta_tasks_running[group_name]
+        return ended_meta_tasks
+
+    async def flush(self, return_exceptions: bool = False):
+        """
+        Calls `asyncio.gather` on all ended/cancelled tasks from the pool, and forgets the tasks.
+
+        This method exists mainly to free up memory of unneeded `Task` objects. It also gets rid of unneeded meta tasks.
+
+        This method blocks, **only if** any of the tasks block while catching a `asyncio.CancelledError` or any of the
+        callbacks registered for the tasks block.
+
+        Args:
+            return_exceptions (optional): Passed directly into `gather`.
+        """
+        await super().flush(return_exceptions=return_exceptions)
+        with suppress(CancelledError):
+            await gather(*self._meta_tasks_cancelled, *self._pop_ended_meta_tasks(),
+                         return_exceptions=return_exceptions)
+        self._meta_tasks_cancelled.clear()
+
+    async def gather_and_close(self, return_exceptions: bool = False):
+        """
+        Calls `asyncio.gather` on **all** tasks in the pool, then permanently closes the pool.
+
+        The `lock()` method must have been called prior to this.
+
+        Note that this method may block indefinitely as long as any task in the pool is not done. This includes meta
+        tasks launched my methods such as `map()`, which ends by itself, only once the `arg_iter` is fully consumed,
+        which may not even be possible (depending on what the iterable of arguments represents). If you want to avoid
+        this, make sure to call `cancel_all()` prior to this.
+
+
+        This method may also block, if one of the tasks blocks while catching a `asyncio.CancelledError` or if any of
+        the callbacks registered for a task blocks for whatever reason.
+
+        Args:
+            return_exceptions (optional): Passed directly into `gather`.
+
+        Raises:
+            `PoolStillUnlocked` if the pool has not been locked yet.
+        """
+        await super().gather_and_close(return_exceptions=return_exceptions)
+        not_cancelled_meta_tasks = set()
+        while self._group_meta_tasks_running:
+            _, meta_tasks = self._group_meta_tasks_running.popitem()
+            not_cancelled_meta_tasks.update(meta_tasks)
+        with suppress(CancelledError):
+            await gather(*self._meta_tasks_cancelled, *not_cancelled_meta_tasks, return_exceptions=return_exceptions)
+        self._meta_tasks_cancelled.clear()
+
+    @staticmethod
+    def _generate_group_name(prefix: str, coroutine_function: CoroutineFunc) -> str:
+        """
+        Creates a task group identifier that includes the current datetime.
+
+        Args:
+            prefix: The start of the name; will be followed by an underscore.
+            coroutine_function: The function representing the task group.
+
+        Returns:
+            The constructed 'prefix_function_datetime' string to name a task group.
+        """
+        return f'{prefix}_{coroutine_function.__name__}_{datetime.now().strftime(DATETIME_FORMAT)}'
+
+    async def _apply_num(self, group_name: str, func: CoroutineFunc, args: ArgsT = (), kwargs: KwArgsT = None,
+                         num: int = 1, end_callback: EndCB = None, cancel_callback: CancelCB = None) -> None:
         """
         Creates a coroutine with the supplied arguments and runs it as a new task in the pool.
 
-        This method blocks, **only if** the pool is full.
+        This method blocks, **only if** the pool has not enough room to accommodate `num` new tasks.
 
         Args:
+            group_name:
+                Name of the task group to add the new task to.
             func:
                 The coroutine function to be run as a task within the task pool.
             args (optional):
                 The positional arguments to pass into the function call.
             kwargs (optional):
                 The keyword-arguments to pass into the function call.
+            num (optional):
+                The number of tasks to spawn with the specified parameters.
             end_callback (optional):
                 A callback to execute after the task has ended.
                 It is run with the task's ID as its only positional argument.
             cancel_callback (optional):
                 A callback to execute after cancellation of the task.
                 It is run with the task's ID as its only positional argument.
-
-        Returns:
-            The newly spawned task's ID within the pool.
         """
         if kwargs is None:
             kwargs = {}
-        return await self._start_task(func(*args, **kwargs), end_callback=end_callback, cancel_callback=cancel_callback)
+        await gather(*(self._start_task(func(*args, **kwargs), group_name=group_name, end_callback=end_callback,
+                                        cancel_callback=cancel_callback) for _ in range(num)))
 
     async def apply(self, func: CoroutineFunc, args: ArgsT = (), kwargs: KwArgsT = None, num: int = 1,
-                    end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> List[int]:
+                    group_name: str = None, end_callback: EndCB = None, cancel_callback: CancelCB = None) -> str:
         """
         Creates an arbitrary number of coroutines with the supplied arguments and runs them as new tasks in the pool.
-        Each coroutine looks like `func(*args, **kwargs)`.
 
-        This method blocks, **only if** there is not enough room in the pool for the desired number of new tasks.
+        Each coroutine looks like `func(*args, **kwargs)`. All the new tasks are added to the same task group.
+        This method blocks, **only if** the pool has not enough room to accommodate `num` new tasks.
 
         Args:
             func:
@@ -444,6 +673,8 @@ class TaskPool(BaseTaskPool):
                 The keyword-arguments to pass into each function call.
             num (optional):
                 The number of tasks to spawn with the specified parameters.
+            group_name (optional):
+                Name of the task group to add the new tasks to.
             end_callback (optional):
                 A callback to execute after a task has ended.
                 It is run with the task's ID as its only positional argument.
@@ -452,176 +683,129 @@ class TaskPool(BaseTaskPool):
                 It is run with the task's ID as its only positional argument.
 
         Returns:
-            The newly spawned tasks' IDs within the pool as a list of integers.
+            The name of the task group that the newly spawned tasks have been added to.
 
         Raises:
+            `PoolIsClosed` if the pool is closed.
             `NotCoroutine` if `func` is not a coroutine function.
-            `PoolIsLocked` if the pool has been locked already.
+            `PoolIsLocked` if the pool has been locked.
         """
-        ids = await gather(*(self._apply_one(func, args, kwargs, end_callback, cancel_callback) for _ in range(num)))
-        # TODO: for some reason PyCharm wrongly claims that `gather` returns a tuple of exceptions
-        assert isinstance(ids, list)
-        return ids
+        self._check_start(function=func)
+        if group_name is None:
+            group_name = self._generate_group_name('apply', func)
+        group_reg = self._task_groups.setdefault(group_name, TaskGroupRegister())
+        async with group_reg:
+            task = create_task(self._apply_num(group_name, func, args, kwargs, num, end_callback, cancel_callback))
+        await task
+        return group_name
 
-    async def _queue_producer(self, q: Queue, args_iter: Iterator[Any]) -> None:
+    @classmethod
+    async def _queue_producer(cls, arg_queue: Queue, arg_iter: Iterator[Any], group_name: str) -> None:
         """
         Keeps the arguments queue from `_map()` full as long as the iterator has elements.
-        If the `_interrupt_flag` gets set, the loop ends prematurely.
+
+        Intended to be run as a meta task of a specific group.
 
         Args:
-            q:
-                The queue of function arguments to consume for starting the next task.
-            args_iter:
-                The iterator of function arguments to put into the queue.
-        """
-        for arg in args_iter:
-            if self._interrupt_flag.is_set():
-                break
-            await q.put(arg)  # This blocks as long as the queue is full.
-
-    async def _queue_consumer(self, q: Queue, first_batch_started: Event, func: CoroutineFunc, arg_stars: int = 0,
-                              end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
-        """
-        Wrapper around the `_start_task()` taking the next element from the arguments queue set up in `_map()`.
-        Partially constructs the `_queue_callback` function with the same arguments.
-
-        Args:
-            q:
-                The queue of function arguments to consume for starting the next task.
-            first_batch_started:
-                The event flag to wait for, before launching the next consumer.
-                It can only set by the `_map()` method, which happens after the first batch of task has been started.
-            func:
-                The coroutine function to use for spawning the tasks within the task pool.
-            arg_stars (optional):
-                Whether or not to unpack an element from `q` using stars; must be 0, 1, or 2.
-            end_callback (optional):
-                The actual callback specified to execute after the task (and the next one) has ended.
-                It is run with the task's ID as its only positional argument.
-            cancel_callback (optional):
-                The callback that was specified to execute after cancellation of the task (and the next one).
-                It is run with the task's ID as its only positional argument.
+            arg_queue: The queue of function arguments to consume for starting a new task.
+            arg_iter: The iterator of function arguments to put into the queue.
+            group_name: Name of the task group associated with this producer.
         """
         try:
-            arg = q.get_nowait()
-        except QueueEmpty:
-            return
-        try:
-            await self._start_task(
-                star_function(func, arg, arg_stars=arg_stars),
-                ignore_lock=True,
-                end_callback=partial(TaskPool._queue_callback, self, q=q, first_batch_started=first_batch_started,
-                                     func=func, arg_stars=arg_stars, end_callback=end_callback,
-                                     cancel_callback=cancel_callback),
-                cancel_callback=cancel_callback
-            )
+            for arg in arg_iter:
+                await arg_queue.put(arg)  # This blocks as long as the queue is full.
+        except CancelledError:
+            # This means that no more tasks are supposed to be created from this `_map()` call;
+            # thus, we can immediately drain the entire queue and forget about the rest of the arguments.
+            log.debug("Cancelled consumption of argument iterable in task group '%s'", group_name)
+            while True:
+                try:
+                    arg_queue.get_nowait()
+                    arg_queue.item_processed()
+                except QueueEmpty:
+                    return
         finally:
-            q.task_done()
+            await arg_queue.put(cls._QUEUE_END_SENTINEL)
 
-    async def _queue_callback(self, task_id: int, q: Queue, first_batch_started: Event, func: CoroutineFunc,
-                              arg_stars: int = 0, end_callback: EndCallbackT = None,
-                              cancel_callback: CancelCallbackT = None) -> None:
+    @staticmethod
+    def _get_map_end_callback(map_semaphore: Semaphore, actual_end_callback: EndCB) -> EndCB:
+        """Returns a wrapped `end_callback` for each `_queue_consumer()` task that will release the `map_semaphore`."""
+        async def release_callback(task_id: int) -> None:
+            map_semaphore.release()
+            await execute_optional(actual_end_callback, args=(task_id,))
+        return release_callback
+
+    async def _queue_consumer(self, arg_queue: Queue, group_name: str, func: CoroutineFunc, arg_stars: int = 0,
+                              end_callback: EndCB = None, cancel_callback: CancelCB = None) -> None:
         """
-        Wrapper around an end callback function passed into the `_map()` method.
-        Triggers the next `_queue_consumer` with the same arguments.
+        Consumes arguments from the queue from `_map()` and keeps a limited number of tasks working on them.
+
+        The queue's maximum size is taken as the limiting value of an internal semaphore, which must be acquired before
+        a new task can be started, and which must be released when one of these tasks ends.
+
+        Intended to be run as a meta task of a specific group.
 
         Args:
-            task_id:
-                The ID of the ending task.
-            q:
-                The queue of function arguments to consume for starting the next task.
-            first_batch_started:
-                The event flag to wait for, before launching the next consumer.
-                It can only set by the `_map()` method, which happens after the first batch of task has been started.
+            arg_queue:
+                The queue of function arguments to consume for starting a new task.
+            group_name:
+                Name of the associated task group; passed into the `_start_task()` method.
             func:
-                The coroutine function to use for spawning the tasks within the task pool.
+                The coroutine function to use for spawning the new tasks within the task pool.
             arg_stars (optional):
-                Whether or not to unpack an element from `q` using stars; must be 0, 1, or 2.
+                Whether or not to unpack an element from `arg_queue` using stars; must be 0, 1, or 2.
             end_callback (optional):
                 The actual callback specified to execute after the task (and the next one) has ended.
-                It is run with the `task_id` as its only positional argument.
+                It is run with the task's ID as its only positional argument.
             cancel_callback (optional):
                 The callback that was specified to execute after cancellation of the task (and the next one).
-                It is run with the `task_id` as its only positional argument.
+                It is run with the task's ID as its only positional argument.
         """
-        await first_batch_started.wait()
-        await self._queue_consumer(q, first_batch_started, func, arg_stars,
-                                   end_callback=end_callback, cancel_callback=cancel_callback)
-        await execute_optional(end_callback, args=(task_id,))
+        map_semaphore = Semaphore(arg_queue.maxsize)  # value determined by `group_size` in `_map()`
+        release_cb = self._get_map_end_callback(map_semaphore, actual_end_callback=end_callback)
+        while True:
+            # The following line blocks **only if** the number of running tasks spawned by this method has reached the
+            # specified maximum as determined in the `_map()` method.
+            await map_semaphore.acquire()
+            # We await the queue's `get()` coroutine and subsequently ensure that its `task_done()` method is called.
+            async with arg_queue as next_arg:
+                if next_arg is self._QUEUE_END_SENTINEL:
+                    # The `_queue_producer()` either reached the last argument or was cancelled.
+                    return
+                await self._start_task(star_function(func, next_arg, arg_stars=arg_stars), group_name=group_name,
+                                       ignore_lock=True, end_callback=release_cb, cancel_callback=cancel_callback)
 
-    def _set_up_args_queue(self, args_iter: ArgsT, num_tasks: int) -> Queue:
-        """
-        Helper function for `_map()`.
-        Takes the iterable of function arguments `args_iter` and adds up to `group_size` to a new `asyncio.Queue`.
-        The queue's `join()` method is added to the pool's `_before_gathering` list and the queue is returned.
-
-        If the iterable contains less than `group_size` elements, nothing else happens; otherwise the `_queue_producer`
-        is started as a separate task with the arguments queue and and iterator of the remaining arguments.
-
-        Args:
-            args_iter:
-                The iterable of function arguments passed into `_map()` to use for creating the new tasks.
-            num_tasks:
-                The maximum number of the new tasks to run concurrently that was passed into `_map()`.
-
-        Returns:
-            The newly created and filled arguments queue for spawning new tasks.
-        """
-        # Setting the `maxsize` of the queue to `group_size` will ensure that no more than `group_size` tasks will run
-        # concurrently because the size of the queue is what will determine the number of immediately started tasks in
-        # the `_map()` method and each of those will only ever start (at most) one other task upon ending.
-        args_queue = Queue(maxsize=num_tasks)
-        self._before_gathering.append(join_queue(args_queue))
-        args_iter = iter(args_iter)
-        try:
-            # Here we guarantee that the queue will contain as many arguments as needed for starting the first batch of
-            # tasks, which will be at most `group_size` (meaning the queue will be full).
-            for i in range(num_tasks):
-                args_queue.put_nowait(next(args_iter))
-        except StopIteration:
-            # If we get here, this means that the number of elements in the arguments iterator was less than the
-            # specified `group_size`. Still, the number of tasks to start immediately will be the size of the queue.
-            # The `_queue_producer` won't be necessary, since we already put all the elements in the queue.
-            pass
-        else:
-            # There may be more elements in the arguments iterator, so we need the `_queue_producer`.
-            # It will have exclusive access to the `args_iter` from now on.
-            # Since the queue is full already, it will wait until one of the tasks in the first batch ends,
-            # before putting the next item in it.
-            create_task(self._queue_producer(args_queue, args_iter))
-        return args_queue
-
-    async def _map(self, func: CoroutineFunc, args_iter: ArgsT, arg_stars: int = 0, group_size: int = 1,
-                   end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
+    async def _map(self, group_name: str, group_size: int, func: CoroutineFunc, arg_iter: ArgsT, arg_stars: int,
+                   end_callback: EndCB = None, cancel_callback: CancelCB = None) -> None:
         """
         Creates coroutines with arguments from the supplied iterable and runs them as new tasks in the pool.
 
-        Each coroutine looks like `func(arg)`, `func(*arg)`, or `func(**arg)`, `arg` being taken from `args_iter`.
+        Each coroutine looks like `func(arg)`, `func(*arg)`, or `func(**arg)`, `arg` being taken from `arg_iter`.
+        All the new tasks are added to the same task group.
 
         The `group_size` determines the maximum number of tasks spawned this way that shall be running concurrently at
-        any given moment in time. Assuming the number of elements produced by `args_iter` is greater than `group_size`,
-        this method will block **only** until the first `group_size` tasks have been **started**, before returning.
-        (If the  number of elements from `args_iter` is smaller than `group_size`, this method will return as soon as
-        all of them have been started.)
+        any given moment in time. As soon as one task from this group ends, it triggers the start of a new task
+        (assuming there is room in the pool), which consumes the next element from the arguments iterable. If the size
+        of the pool never imposes a limit, this ensures that the number of tasks belonging to this group and running
+        concurrently is always equal to `group_size` (except for when `arg_iter` is exhausted of course).
 
-        As soon as one task from this first batch ends, it triggers the start of a new task (assuming there is room in
-        the pool), which consumes the next element from the arguments iterable. If the size of the pool never imposes a
-        limit, this ensures that the number of tasks running concurrently as a result of this method call is always
-        equal to `group_size` (except for when `args_iter` is exhausted of course).
-
-        Thus, this method blocks, **only if** there is not enough room in the pool for the first batch of new tasks.
-
-        This method sets up an internal arguments queue which is continuously filled while consuming the `args_iter`.
+        This method sets up an internal arguments queue which is continuously filled while consuming the `arg_iter`.
+        Because this method delegates the spawning of the tasks to two meta tasks (a producer and a consumer of the
+        aforementioned queue), it **never blocks**. However, just because this method returns immediately, this does
+        not mean that any task was started or that any number of tasks will start soon, as this is solely determined by
+        the `pool_size` and the `group_size`.
 
         Args:
+            group_name:
+                Name of the task group to add the new tasks to. It must be a name that doesn't exist yet.
+            group_size:
+                The maximum number new tasks spawned by this method to run concurrently.
             func:
                 The coroutine function to use for spawning the new tasks within the task pool.
-            args_iter:
+            arg_iter:
                 The iterable of arguments; each element is to be passed into a `func` call when spawning a new task.
-            arg_stars (optional):
+            arg_stars:
                 Whether or not to unpack an element from `args_iter` using stars; must be 0, 1, or 2.
-            group_size (optional):
-                The maximum number new tasks spawned by this method to run concurrently. Defaults to 1.
             end_callback (optional):
                 A callback to execute after a task has ended.
                 It is run with the task's ID as its only positional argument.
@@ -630,44 +814,46 @@ class TaskPool(BaseTaskPool):
                 It is run with the task's ID as its only positional argument.
 
         Raises:
-            `asyncio_taskpool.exceptions.PoolIsLocked` if the pool has been locked.
+            `ValueError` if `group_size` is less than 1.
+            `asyncio_taskpool.exceptions.InvalidGroupName` if a group named `group_name` exists in the pool.
         """
-        if not self._locked:
-            raise exceptions.PoolIsLocked("Cannot start new tasks")
-        args_queue = self._set_up_args_queue(args_iter, group_size)
-        # We need a flag to ensure that starting all tasks from the first batch here will not be blocked by the
-        # `_queue_callback` triggered by one or more of them.
-        # This could happen, e.g. if the pool has just enough room for one more task, but the queue here contains more
-        # than one element, and the pool remains full until after the first task of the first batch ends. Then the
-        # callback might trigger the next `_queue_consumer` before this method can, which will keep it blocked.
-        first_batch_started = Event()
-        for _ in range(args_queue.qsize()):
-            # This is where blocking can occur, if the pool is full.
-            await self._queue_consumer(args_queue, first_batch_started, func,
-                                       arg_stars=arg_stars, end_callback=end_callback, cancel_callback=cancel_callback)
-        # Now the callbacks can immediately trigger more tasks.
-        first_batch_started.set()
+        self._check_start(function=func)
+        if group_size < 1:
+            raise ValueError(f"Group size must be a positive integer.")
+        if group_name in self._task_groups.keys():
+            raise exceptions.InvalidGroupName(f"Group named {group_name} already exists!")
+        self._task_groups[group_name] = group_reg = TaskGroupRegister()
+        async with group_reg:
+            # Set up internal arguments queue. We limit its maximum size to enable lazy consumption of `arg_iter` by the
+            # `_queue_producer()`; that way an argument
+            arg_queue = Queue(maxsize=group_size)
+            self._before_gathering.append(join_queue(arg_queue))
+            meta_tasks = self._group_meta_tasks_running.setdefault(group_name, set())
+            # Start the producer and consumer meta tasks.
+            meta_tasks.add(create_task(self._queue_producer(arg_queue, iter(arg_iter), group_name)))
+            meta_tasks.add(create_task(self._queue_consumer(arg_queue, group_name, func, arg_stars,
+                                                            end_callback, cancel_callback)))
 
-    async def map(self, func: CoroutineFunc, arg_iter: ArgsT, group_size: int = 1,
-                  end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
+    async def map(self, func: CoroutineFunc, arg_iter: ArgsT, group_size: int = 1, group_name: str = None,
+                  end_callback: EndCB = None, cancel_callback: CancelCB = None) -> str:
         """
         An asyncio-task-based equivalent of the `multiprocessing.pool.Pool.map` method.
 
         Creates coroutines with arguments from the supplied iterable and runs them as new tasks in the pool.
         Each coroutine looks like `func(arg)`, `arg` being an element taken from `arg_iter`.
+        All the new tasks are added to the same task group.
 
         The `group_size` determines the maximum number of tasks spawned this way that shall be running concurrently at
-        any given moment in time. Assuming the number of elements produced by `arg_iter` is greater than `group_size`,
-        this method will block **only** until the first `group_size` tasks have been **started**, before returning.
-        (If the  number of elements from `arg_iter` is smaller than `group_size`, this method will return as soon as
-        all of them have been started.)
+        any given moment in time. As soon as one task from this group ends, it triggers the start of a new task
+        (assuming there is room in the pool), which consumes the next element from the arguments iterable. If the size
+        of the pool never imposes a limit, this ensures that the number of tasks belonging to this group and running
+        concurrently is always equal to `group_size` (except for when `arg_iter` is exhausted of course).
 
-        As soon as one task from this first batch ends, it triggers the start of a new task (assuming there is room in
-        the pool), which consumes the next element from the arguments iterable. If the size of the pool never imposes a
-        limit, this ensures that the number of tasks running concurrently as a result of this method call is always
-        equal to `group_size` (except for when `arg_iter` is exhausted of course).
-
-        Thus, this method blocks, **only if** there is not enough room in the pool for the first batch of new tasks.
+        This method sets up an internal arguments queue which is continuously filled while consuming the `arg_iter`.
+        Because this method delegates the spawning of the tasks to two meta tasks (a producer and a consumer of the
+        aforementioned queue), it **never blocks**. However, just because this method returns immediately, this does
+        not mean that any task was started or that any number of tasks will start soon, as this is solely determined by
+        the `pool_size` and the `group_size`.
 
         Args:
             func:
@@ -676,6 +862,8 @@ class TaskPool(BaseTaskPool):
                 The iterable of arguments; each argument is to be passed into a `func` call when spawning a new task.
             group_size (optional):
                 The maximum number new tasks spawned by this method to run concurrently. Defaults to 1.
+            group_name (optional):
+                Name of the task group to add the new tasks to. If provided, it must be a name that doesn't exist yet.
             end_callback (optional):
                 A callback to execute after a task has ended.
                 It is run with the task's ID as its only positional argument.
@@ -683,32 +871,48 @@ class TaskPool(BaseTaskPool):
                 A callback to execute after cancellation of a task.
                 It is run with the task's ID as its only positional argument.
 
+        Returns:
+            The name of the task group that the newly spawned tasks will be added to.
+
         Raises:
-            `PoolIsLocked` if the pool has been locked.
+            `PoolIsClosed` if the pool is closed.
             `NotCoroutine` if `func` is not a coroutine function.
+            `PoolIsLocked` if the pool has been locked.
+            `ValueError` if `group_size` is less than 1.
+            `InvalidGroupName` if a group named `group_name` exists in the pool.
         """
-        await self._map(func, arg_iter, arg_stars=0, group_size=group_size,
+        if group_name is None:
+            group_name = self._generate_group_name('map', func)
+        await self._map(group_name, group_size, func, arg_iter, 0,
                         end_callback=end_callback, cancel_callback=cancel_callback)
+        return group_name
 
     async def starmap(self, func: CoroutineFunc, args_iter: Iterable[ArgsT], group_size: int = 1,
-                      end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
+                      group_name: str = None, end_callback: EndCB = None, cancel_callback: CancelCB = None) -> str:
         """
         Like `map()` except that the elements of `args_iter` are expected to be iterables themselves to be unpacked as
         positional arguments to the function.
         Each coroutine then looks like `func(*args)`, `args` being an element from `args_iter`.
         """
-        await self._map(func, args_iter, arg_stars=1, group_size=group_size,
+        if group_name is None:
+            group_name = self._generate_group_name('starmap', func)
+        await self._map(group_name, group_size, func, args_iter, 1,
                         end_callback=end_callback, cancel_callback=cancel_callback)
+        return group_name
 
     async def doublestarmap(self, func: CoroutineFunc, kwargs_iter: Iterable[KwArgsT], group_size: int = 1,
-                            end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None) -> None:
+                            group_name: str = None, end_callback: EndCB = None,
+                            cancel_callback: CancelCB = None) -> str:
         """
         Like `map()` except that the elements of `kwargs_iter` are expected to be iterables themselves to be unpacked as
         keyword-arguments to the function.
         Each coroutine then looks like `func(**kwargs)`, `kwargs` being an element from `kwargs_iter`.
         """
-        await self._map(func, kwargs_iter, arg_stars=2, group_size=group_size,
+        if group_name is None:
+            group_name = self._generate_group_name('doublestarmap', func)
+        await self._map(group_name, group_size, func, kwargs_iter, 2,
                         end_callback=end_callback, cancel_callback=cancel_callback)
+        return group_name
 
 
 class SimpleTaskPool(BaseTaskPool):
@@ -729,7 +933,7 @@ class SimpleTaskPool(BaseTaskPool):
     """
 
     def __init__(self, func: CoroutineFunc, args: ArgsT = (), kwargs: KwArgsT = None,
-                 end_callback: EndCallbackT = None, cancel_callback: CancelCallbackT = None,
+                 end_callback: EndCB = None, cancel_callback: CancelCB = None,
                  pool_size: int = inf, name: str = None) -> None:
         """
 
@@ -756,8 +960,8 @@ class SimpleTaskPool(BaseTaskPool):
         self._func: CoroutineFunc = func
         self._args: ArgsT = args
         self._kwargs: KwArgsT = kwargs if kwargs is not None else {}
-        self._end_callback: EndCallbackT = end_callback
-        self._cancel_callback: CancelCallbackT = cancel_callback
+        self._end_callback: EndCB = end_callback
+        self._cancel_callback: CancelCB = cancel_callback
         super().__init__(pool_size=pool_size, name=name)
 
     @property
@@ -784,7 +988,7 @@ class SimpleTaskPool(BaseTaskPool):
         If `num` is greater than or equal to the number of currently running tasks, naturally all tasks are cancelled.
         """
         ids = []
-        for i, task_id in enumerate(reversed(self._running)):
+        for i, task_id in enumerate(reversed(self._tasks_running)):
             if i >= num:
                 break  # We got the desired number of task IDs, there may well be more tasks left to keep running
             ids.append(task_id)

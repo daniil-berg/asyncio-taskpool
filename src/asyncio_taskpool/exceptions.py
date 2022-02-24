@@ -23,6 +23,10 @@ class PoolException(Exception):
     pass
 
 
+class PoolIsClosed(PoolException):
+    pass
+
+
 class PoolIsLocked(PoolException):
     pass
 
@@ -40,6 +44,10 @@ class AlreadyEnded(TaskEnded):
 
 
 class InvalidTaskID(PoolException):
+    pass
+
+
+class InvalidGroupName(PoolException):
     pass
 
 

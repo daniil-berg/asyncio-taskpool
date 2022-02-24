@@ -21,6 +21,9 @@ Constants used by more than one module in the package.
 
 PACKAGE_NAME = 'asyncio_taskpool'
 
+DEFAULT_TASK_GROUP = ''
+DATETIME_FORMAT = '%Y-%m-%d_%H-%M-%S'
+
 CLIENT_EXIT = 'exit'
 
 SESSION_MSG_BYTES = 1024 * 100

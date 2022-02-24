@@ -32,8 +32,8 @@ KwArgsT = Mapping[str, Any]
 AnyCallableT = Callable[[...], Union[T, Awaitable[T]]]
 CoroutineFunc = Callable[[...], Awaitable[Any]]
 
-EndCallbackT = Callable
-CancelCallbackT = Callable
+EndCB = Callable
+CancelCB = Callable
 
 ConnectedCallbackT = Callable[[StreamReader, StreamWriter], Awaitable[None]]
 ClientConnT = Union[Tuple[StreamReader, StreamWriter], Tuple[None, None]]

@@ -15,11 +15,19 @@ If you need control over a task pool at runtime, you can launch an asynchronous 
 ## Usage
 
 Generally speaking, a task is added to a pool by providing it with a coroutine function reference as well as the arguments for that function. Here is what that could look like in the most simplified form:
+
 ```python
 from asyncio_taskpool import SimpleTaskPool
+
 ...
+
+
 async def work(foo, bar): ...
+
+
 ...
+
+
 async def main():
     pool = SimpleTaskPool(work, args=('xyz', 420))
     await pool.start(5)
@@ -27,11 +35,11 @@ async def main():
     pool.stop(3)
     ...
     pool.lock()
-    await pool.gather()
+    await pool.gather_and_close()
     ...
 ```
 
-Since one of the main goals of `asyncio-taskpool` is to be able to start/stop tasks dynamically or "on-the-fly", _most_ of the associated methods are non-blocking _most_ of the time. A notable exception is the `gather` method for awaiting the return of all tasks in the pool. (It is essentially a glorified wrapper around the [`asyncio.gather`](https://docs.python.org/3/library/asyncio-task.html#asyncio.gather) function.)
+Since one of the main goals of `asyncio-taskpool` is to be able to start/stop tasks dynamically or "on-the-fly", _most_ of the associated methods are non-blocking _most_ of the time. A notable exception is the `gather_and_close` method for awaiting the return of all tasks in the pool. (It is essentially a glorified wrapper around the [`asyncio.gather`](https://docs.python.org/3/library/asyncio-task.html#asyncio.gather) function.)
 
 For working and fully documented demo scripts see [USAGE.md](usage/USAGE.md).
 

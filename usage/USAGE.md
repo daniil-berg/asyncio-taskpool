@@ -28,7 +28,7 @@ async def work(n: int) -> None:
     """
     for i in range(n):
         await asyncio.sleep(1)
-        print("did", i)
+        print("> did", i)
 
 
 async def main() -> None:
@@ -39,7 +39,7 @@ async def main() -> None:
     await asyncio.sleep(1.5)  # lets the tasks work for a bit
     pool.stop(2)  # cancels tasks 3 and 2
     pool.lock()  # required for the last line
-    await pool.gather()  # awaits all tasks, then flushes the pool
+    await pool.gather_and_close()  # awaits all tasks, then flushes the pool
 
 
 if __name__ == '__main__':
@@ -52,29 +52,29 @@ SimpleTaskPool-0 initialized
 Started SimpleTaskPool-0_Task-0
 Started SimpleTaskPool-0_Task-1
 Started SimpleTaskPool-0_Task-2
-did 0
-did 0
-did 0
+> did 0
+> did 0
+> did 0
 Started SimpleTaskPool-0_Task-3
-did 1
-did 1
-did 1
-did 0
+> did 1
+> did 1
+> did 1
+> did 0
+> did 2
+> did 2
 SimpleTaskPool-0 is locked!
-Cancelling SimpleTaskPool-0_Task-3 ...
-Cancelled SimpleTaskPool-0_Task-3
-Ended SimpleTaskPool-0_Task-3
 Cancelling SimpleTaskPool-0_Task-2 ...
 Cancelled SimpleTaskPool-0_Task-2
 Ended SimpleTaskPool-0_Task-2
-did 2
-did 2
-did 3
-did 3
+Cancelling SimpleTaskPool-0_Task-3 ...
+Cancelled SimpleTaskPool-0_Task-3
+Ended SimpleTaskPool-0_Task-3
+> did 3
+> did 3
 Ended SimpleTaskPool-0_Task-0
 Ended SimpleTaskPool-0_Task-1
-did 4
-did 4
+> did 4
+> did 4
 ```
 
 ## Advanced example for `TaskPool`
@@ -101,21 +101,21 @@ async def work(start: int, stop: int, step: int = 1) -> None:
     """Pseudo-worker function counting through a range with a second of sleep in between each iteration."""
     for i in range(start, stop, step):
         await asyncio.sleep(1)
-        print("work with", i)
+        print("> work with", i)
 
 
 async def other_work(a: int, b: int) -> None:
     """Different pseudo-worker counting through a range with half a second of sleep in between each iteration."""
     for i in range(a, b):
         await asyncio.sleep(0.5)
-        print("other_work with", i)
+        print("> other_work with", i)
 
 
 async def main() -> None:
     # Initialize a new task pool instance and limit its size to 3 tasks.
     pool = TaskPool(3)
     # Queue up two tasks (IDs 0 and 1) to run concurrently (with the same positional arguments).
-    print("Called `apply`")
+    print("> Called `apply`")
     await pool.apply(work, kwargs={'start': 100, 'stop': 200, 'step': 10}, num=2)
     # Let the tasks work for a bit.
     await asyncio.sleep(1.5)
@@ -124,20 +124,18 @@ async def main() -> None:
     # Since we set our pool size to 3, and already have two tasks working within the pool,
     # only the first one of these will start immediately (and receive ID 2).
     # The second one will start (with ID 3), only once there is room in the pool,
-    # which -- in this example -- will be the case after ID 2 ends;
-    # until then the `starmap` method call **will block**!
+    # which -- in this example -- will be the case after ID 2 ends.
     # Once there is room in the pool again, the third and fourth will each start (with IDs 4 and 5)
-    # **only** once there is room in the pool **and** no more than one of these last four tasks is running.
+    # **only** once there is room in the pool **and** no more than one other task of these new ones is running.
     args_list = [(0, 10), (10, 20), (20, 30), (30, 40)]
-    print("Calling `starmap`...")
     await pool.starmap(other_work, args_list, group_size=2)
-    print("`starmap` returned")
+    print("> Called `starmap`")
     # Now we lock the pool, so that we can safely await all our tasks.
     pool.lock()
     # Finally, we block, until all tasks have ended.
-    print("Called `gather`")
-    await pool.gather()
-    print("Done.")
+    print("> Calling `gather_and_close`...")
+    await pool.gather_and_close()
+    print("> Done.")
 
 
 if __name__ == '__main__':
@@ -152,82 +150,81 @@ Additional comments for the output are provided with `<---` next to the output l
 TaskPool-0 initialized
 Started TaskPool-0_Task-0
 Started TaskPool-0_Task-1
-Called `apply`
-work with 100
-work with 100
-Calling `starmap`...    <--- notice that this blocks as expected
-Started TaskPool-0_Task-2
-work with 110
-work with 110
-other_work with 0
-other_work with 1
-work with 120
-work with 120
-other_work with 2
-other_work with 3
-work with 130
-work with 130
-other_work with 4
-other_work with 5
-work with 140
-work with 140
-other_work with 6
-other_work with 7
-work with 150
-work with 150
-other_work with 8
-Ended TaskPool-0_Task-2    <--- here Task-2 makes room in the pool and unblocks `main()`
+> Called `apply`
+> work with 100
+> work with 100
+> Called `starmap`   <--- notice that this immediately returns, even before Task-2 is started
+> Calling `gather_and_close`...    <--- this blocks `main()` until all tasks have ended
 TaskPool-0 is locked!
+Started TaskPool-0_Task-2    <--- at this point the pool is full
+> work with 110
+> work with 110
+> other_work with 0
+> other_work with 1
+> work with 120
+> work with 120
+> other_work with 2
+> other_work with 3
+> work with 130
+> work with 130
+> other_work with 4
+> other_work with 5
+> work with 140
+> work with 140
+> other_work with 6
+> other_work with 7
+> work with 150
+> work with 150
+> other_work with 8
+Ended TaskPool-0_Task-2    <--- this frees up room for one more task from `starmap`
 Started TaskPool-0_Task-3
-other_work with 9
-`starmap` returned
-Called `gather`    <--- now this will block `main()` until all tasks have ended
-work with 160
-work with 160
-other_work with 10
-other_work with 11
-work with 170
-work with 170
-other_work with 12
-other_work with 13
-work with 180
-work with 180
-other_work with 14
-other_work with 15
+> other_work with 9
+> work with 160
+> work with 160
+> other_work with 10
+> other_work with 11
+> work with 170
+> work with 170
+> other_work with 12
+> other_work with 13
+> work with 180
+> work with 180
+> other_work with 14
+> other_work with 15
 Ended TaskPool-0_Task-0
-Ended TaskPool-0_Task-1    <--- even though there is room in the pool now, Task-5 will not start
-Started TaskPool-0_Task-4
-work with 190
-work with 190
-other_work with 16
-other_work with 20
-other_work with 17
-other_work with 21
-other_work with 18
-other_work with 22
-other_work with 19
-Ended TaskPool-0_Task-3    <--- now that only Task-4 is left, Task-5 will start
+Ended TaskPool-0_Task-1    <--- these two end and free up two more slots in the pool
+Started TaskPool-0_Task-4    <--- since the group size is set to 2, Task-5 will not start
+> work with 190
+> work with 190
+> other_work with 16
+> other_work with 17
+> other_work with 20
+> other_work with 18
+> other_work with 21
+Ended TaskPool-0_Task-3    <--- now that only Task-4 of the group remains, Task-5 starts
 Started TaskPool-0_Task-5
-other_work with 23
-other_work with 30
-other_work with 24
-other_work with 31
-other_work with 25
-other_work with 32
-other_work with 26
-other_work with 33
-other_work with 27
-other_work with 34
-other_work with 28
-other_work with 35
+> other_work with 19
+> other_work with 22
+> other_work with 23
+> other_work with 30
+> other_work with 24
+> other_work with 31
+> other_work with 25
+> other_work with 32
+> other_work with 26
+> other_work with 33
+> other_work with 27
+> other_work with 34
+> other_work with 28
+> other_work with 35
+> other_work with 29
+> other_work with 36
 Ended TaskPool-0_Task-4
-other_work with 29
-other_work with 36
-other_work with 37
-other_work with 38
-other_work with 39
-Done.
+> other_work with 37
+> other_work with 38
+> other_work with 39
 Ended TaskPool-0_Task-5
+> Done.
 ```
 
 © 2022 Daniil Fajnberg

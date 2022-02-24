@@ -18,19 +18,20 @@ __doc__ = """
 Unittests for the `asyncio_taskpool.pool` module.
 """
 
-
-import asyncio
 from asyncio.exceptions import CancelledError
-from asyncio.queues import Queue
+from asyncio.locks import Semaphore
+from asyncio.queues import QueueEmpty
+from datetime import datetime
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import PropertyMock, MagicMock, AsyncMock, patch, call
 from typing import Type
 
 from asyncio_taskpool import pool, exceptions
+from asyncio_taskpool.constants import DATETIME_FORMAT
 
 
-EMPTY_LIST, EMPTY_DICT = [], {}
-FOO, BAR = 'foo', 'bar'
+EMPTY_LIST, EMPTY_DICT, EMPTY_SET = [], {}, set()
+FOO, BAR, BAZ = 'foo', 'bar', 'baz'
 
 
 class TestException(Exception):
@@ -45,19 +46,12 @@ class CommonTestCase(IsolatedAsyncioTestCase):
     task_pool: pool.BaseTaskPool
     log_lvl: int
 
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.log_lvl = pool.log.level
-        pool.log.setLevel(999)
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        pool.log.setLevel(cls.log_lvl)
-
     def get_task_pool_init_params(self) -> dict:
         return {'pool_size': self.TEST_POOL_SIZE, 'name': self.TEST_POOL_NAME}
 
     def setUp(self) -> None:
+        self.log_lvl = pool.log.level
+        pool.log.setLevel(999)
         self._pools = self.TEST_CLASS._pools
         # These three methods are called during initialization, so we mock them by default during setup:
         self._add_pool_patcher = patch.object(self.TEST_CLASS, '_add_pool')
@@ -76,6 +70,7 @@ class CommonTestCase(IsolatedAsyncioTestCase):
         self._add_pool_patcher.stop()
         self.pool_size_patcher.stop()
         self.dunder_str_patcher.stop()
+        pool.log.setLevel(self.log_lvl)
 
 
 class BaseTaskPoolTestCase(CommonTestCase):
@@ -88,19 +83,23 @@ class BaseTaskPoolTestCase(CommonTestCase):
         self.assertListEqual([self.task_pool], pool.BaseTaskPool._pools)
 
     def test_init(self):
-        self.assertIsInstance(self.task_pool._enough_room, asyncio.locks.Semaphore)
+        self.assertEqual(0, self.task_pool._num_started)
+        self.assertEqual(0, self.task_pool._num_cancellations)
+
         self.assertFalse(self.task_pool._locked)
-        self.assertEqual(0, self.task_pool._counter)
-        self.assertDictEqual(EMPTY_DICT, self.task_pool._running)
-        self.assertDictEqual(EMPTY_DICT, self.task_pool._cancelled)
-        self.assertDictEqual(EMPTY_DICT, self.task_pool._ended)
-        self.assertEqual(0, self.task_pool._num_cancelled)
-        self.assertEqual(0, self.task_pool._num_ended)
-        self.assertEqual(self.mock_idx, self.task_pool._idx)
+        self.assertFalse(self.task_pool._closed)
         self.assertEqual(self.TEST_POOL_NAME, self.task_pool._name)
+
+        self.assertDictEqual(EMPTY_DICT, self.task_pool._tasks_running)
+        self.assertDictEqual(EMPTY_DICT, self.task_pool._tasks_cancelled)
+        self.assertDictEqual(EMPTY_DICT, self.task_pool._tasks_ended)
+
         self.assertListEqual(self.task_pool._before_gathering, EMPTY_LIST)
-        self.assertIsInstance(self.task_pool._interrupt_flag, asyncio.locks.Event)
-        self.assertFalse(self.task_pool._interrupt_flag.is_set())
+        self.assertIsInstance(self.task_pool._enough_room, Semaphore)
+        self.assertDictEqual(EMPTY_DICT, self.task_pool._task_groups)
+
+        self.assertEqual(self.mock_idx, self.task_pool._idx)
+
         self.mock__add_pool.assert_called_once_with(self.task_pool)
         self.mock_pool_size.assert_called_once_with(self.TEST_POOL_SIZE)
         self.mock___str__.assert_called_once_with()
@@ -143,25 +142,55 @@ class BaseTaskPoolTestCase(CommonTestCase):
         self.assertFalse(self.task_pool._locked)
 
     def test_num_running(self):
-        self.task_pool._running = ['foo', 'bar', 'baz']
+        self.task_pool._tasks_running = {1: FOO, 2: BAR, 3: BAZ}
         self.assertEqual(3, self.task_pool.num_running)
 
-    def test_num_cancelled(self):
-        self.task_pool._num_cancelled = 3
-        self.assertEqual(3, self.task_pool.num_cancelled)
+    def test_num_cancellations(self):
+        self.task_pool._num_cancellations = 3
+        self.assertEqual(3, self.task_pool.num_cancellations)
 
     def test_num_ended(self):
-        self.task_pool._num_ended = 3
+        self.task_pool._tasks_ended = {1: FOO, 2: BAR, 3: BAZ}
         self.assertEqual(3, self.task_pool.num_ended)
 
     def test_num_finished(self):
-        self.task_pool._num_cancelled = cancelled = 69
-        self.task_pool._num_ended = ended = 420
-        self.task_pool._cancelled = mock_cancelled_dict = {1: 'foo', 2: 'bar'}
-        self.assertEqual(ended - cancelled + len(mock_cancelled_dict), self.task_pool.num_finished)
+        self.task_pool._num_cancellations = num_cancellations = 69
+        num_ended = 420
+        self.task_pool._tasks_ended = {i: FOO for i in range(num_ended)}
+        self.task_pool._tasks_cancelled = mock_cancelled_dict = {1: FOO, 2: BAR, 3: BAZ}
+        self.assertEqual(num_ended - num_cancellations + len(mock_cancelled_dict), self.task_pool.num_finished)
 
     def test_is_full(self):
         self.assertEqual(self.task_pool._enough_room.locked(), self.task_pool.is_full)
+
+    def test_get_task_group_ids(self):
+        group_name, ids = 'abcdef', [1, 2, 3]
+        self.task_pool._task_groups[group_name] = MagicMock(__iter__=lambda _: iter(ids))
+        self.assertEqual(set(ids), self.task_pool.get_task_group_ids(group_name))
+        with self.assertRaises(exceptions.InvalidGroupName):
+            self.task_pool.get_task_group_ids('something else')
+
+    async def test__check_start(self):
+        self.task_pool._closed = True
+        mock_coroutine, mock_coroutine_function = AsyncMock()(), AsyncMock()
+        try:
+            with self.assertRaises(AssertionError):
+                self.task_pool._check_start(awaitable=None, function=None)
+            with self.assertRaises(AssertionError):
+                self.task_pool._check_start(awaitable=mock_coroutine, function=mock_coroutine_function)
+            with self.assertRaises(exceptions.NotCoroutine):
+                self.task_pool._check_start(awaitable=mock_coroutine_function, function=None)
+            with self.assertRaises(exceptions.NotCoroutine):
+                self.task_pool._check_start(awaitable=None, function=mock_coroutine)
+            with self.assertRaises(exceptions.PoolIsClosed):
+                self.task_pool._check_start(awaitable=mock_coroutine, function=None)
+            self.task_pool._closed = False
+            self.task_pool._locked = True
+            with self.assertRaises(exceptions.PoolIsLocked):
+                self.task_pool._check_start(awaitable=mock_coroutine, function=None, ignore_lock=False)
+            self.assertIsNone(self.task_pool._check_start(awaitable=mock_coroutine, function=None, ignore_lock=True))
+        finally:
+            await mock_coroutine
 
     def test__task_name(self):
         i = 123
@@ -171,12 +200,12 @@ class BaseTaskPoolTestCase(CommonTestCase):
     @patch.object(pool.BaseTaskPool, '_task_name', return_value=FOO)
     async def test__task_cancellation(self, mock__task_name: MagicMock, mock_execute_optional: AsyncMock):
         task_id, mock_task, mock_callback = 1, MagicMock(), MagicMock()
-        self.task_pool._num_cancelled = cancelled = 3
-        self.task_pool._running[task_id] = mock_task
+        self.task_pool._num_cancellations = cancelled = 3
+        self.task_pool._tasks_running[task_id] = mock_task
         self.assertIsNone(await self.task_pool._task_cancellation(task_id, mock_callback))
-        self.assertNotIn(task_id, self.task_pool._running)
-        self.assertEqual(mock_task, self.task_pool._cancelled[task_id])
-        self.assertEqual(cancelled + 1, self.task_pool._num_cancelled)
+        self.assertNotIn(task_id, self.task_pool._tasks_running)
+        self.assertEqual(mock_task, self.task_pool._tasks_cancelled[task_id])
+        self.assertEqual(cancelled + 1, self.task_pool._num_cancellations)
         mock__task_name.assert_called_with(task_id)
         mock_execute_optional.assert_awaited_once_with(mock_callback, args=(task_id, ))
 
@@ -184,15 +213,13 @@ class BaseTaskPoolTestCase(CommonTestCase):
     @patch.object(pool.BaseTaskPool, '_task_name', return_value=FOO)
     async def test__task_ending(self, mock__task_name: MagicMock, mock_execute_optional: AsyncMock):
         task_id, mock_task, mock_callback = 1, MagicMock(), MagicMock()
-        self.task_pool._num_ended = ended = 3
         self.task_pool._enough_room._value = room = 123
 
         # End running task:
-        self.task_pool._running[task_id] = mock_task
+        self.task_pool._tasks_running[task_id] = mock_task
         self.assertIsNone(await self.task_pool._task_ending(task_id, mock_callback))
-        self.assertNotIn(task_id, self.task_pool._running)
-        self.assertEqual(mock_task, self.task_pool._ended[task_id])
-        self.assertEqual(ended + 1, self.task_pool._num_ended)
+        self.assertNotIn(task_id, self.task_pool._tasks_running)
+        self.assertEqual(mock_task, self.task_pool._tasks_ended[task_id])
         self.assertEqual(room + 1, self.task_pool._enough_room._value)
         mock__task_name.assert_called_with(task_id)
         mock_execute_optional.assert_awaited_once_with(mock_callback, args=(task_id, ))
@@ -200,11 +227,10 @@ class BaseTaskPoolTestCase(CommonTestCase):
         mock_execute_optional.reset_mock()
 
         # End cancelled task:
-        self.task_pool._cancelled[task_id] = self.task_pool._ended.pop(task_id)
+        self.task_pool._tasks_cancelled[task_id] = self.task_pool._tasks_ended.pop(task_id)
         self.assertIsNone(await self.task_pool._task_ending(task_id, mock_callback))
-        self.assertNotIn(task_id, self.task_pool._cancelled)
-        self.assertEqual(mock_task, self.task_pool._ended[task_id])
-        self.assertEqual(ended + 2, self.task_pool._num_ended)
+        self.assertNotIn(task_id, self.task_pool._tasks_cancelled)
+        self.assertEqual(mock_task, self.task_pool._tasks_ended[task_id])
         self.assertEqual(room + 2, self.task_pool._enough_room._value)
         mock__task_name.assert_called_with(task_id)
         mock_execute_optional.assert_awaited_once_with(mock_callback, args=(task_id, ))
@@ -246,92 +272,52 @@ class BaseTaskPoolTestCase(CommonTestCase):
     @patch.object(pool, 'create_task')
     @patch.object(pool.BaseTaskPool, '_task_wrapper', new_callable=MagicMock)
     @patch.object(pool.BaseTaskPool, '_task_name', return_value=FOO)
-    async def test__start_task(self, mock__task_name: MagicMock, mock__task_wrapper: AsyncMock,
-                               mock_create_task: MagicMock):
-        def reset_mocks() -> None:
-            mock__task_name.reset_mock()
-            mock__task_wrapper.reset_mock()
-            mock_create_task.reset_mock()
-
+    @patch.object(pool, 'TaskGroupRegister')
+    @patch.object(pool.BaseTaskPool, '_check_start')
+    async def test__start_task(self, mock__check_start: MagicMock, mock_reg_cls: MagicMock, mock__task_name: MagicMock,
+                               mock__task_wrapper: AsyncMock, mock_create_task: MagicMock):
+        mock_group_reg = set_up_mock_group_register(mock_reg_cls)
         mock_create_task.return_value = mock_task = MagicMock()
         mock__task_wrapper.return_value = mock_wrapped = MagicMock()
-        mock_coroutine, mock_cancel_cb, mock_end_cb = AsyncMock(), MagicMock(), MagicMock()
-        self.task_pool._counter = count = 123
+        mock_coroutine, mock_cancel_cb, mock_end_cb = MagicMock(), MagicMock(), MagicMock()
+        self.task_pool._num_started = count = 123
         self.task_pool._enough_room._value = room = 123
-
-        def check_nothing_changed() -> None:
-            self.assertEqual(count, self.task_pool._counter)
-            self.assertNotIn(count, self.task_pool._running)
-            self.assertEqual(room, self.task_pool._enough_room._value)
-            mock__task_name.assert_not_called()
-            mock__task_wrapper.assert_not_called()
-            mock_create_task.assert_not_called()
-            reset_mocks()
-
-        with self.assertRaises(exceptions.NotCoroutine):
-            await self.task_pool._start_task(MagicMock(), end_callback=mock_end_cb, cancel_callback=mock_cancel_cb)
-        check_nothing_changed()
-
-        self.task_pool._locked = True
-        ignore_closed = False
-        mock_awaitable = mock_coroutine()
-        with self.assertRaises(exceptions.PoolIsLocked):
-            await self.task_pool._start_task(mock_awaitable, ignore_closed,
-                                             end_callback=mock_end_cb, cancel_callback=mock_cancel_cb)
-        await mock_awaitable
-        check_nothing_changed()
-
-        ignore_closed = True
-        mock_awaitable = mock_coroutine()
-        output = await self.task_pool._start_task(mock_awaitable, ignore_closed,
+        group_name, ignore_lock = 'testgroup', True
+        output = await self.task_pool._start_task(mock_coroutine, group_name=group_name, ignore_lock=ignore_lock,
                                                   end_callback=mock_end_cb, cancel_callback=mock_cancel_cb)
-        await mock_awaitable
         self.assertEqual(count, output)
-        self.assertEqual(count + 1, self.task_pool._counter)
-        self.assertEqual(mock_task, self.task_pool._running[count])
+        mock__check_start.assert_called_once_with(awaitable=mock_coroutine, ignore_lock=ignore_lock)
         self.assertEqual(room - 1, self.task_pool._enough_room._value)
+        self.assertEqual(mock_group_reg, self.task_pool._task_groups[group_name])
+        mock_reg_cls.assert_called_once_with()
+        mock_group_reg.__aenter__.assert_awaited_once_with()
+        mock_group_reg.add.assert_called_once_with(count)
         mock__task_name.assert_called_once_with(count)
-        mock__task_wrapper.assert_called_once_with(mock_awaitable, count, mock_end_cb, mock_cancel_cb)
-        mock_create_task.assert_called_once_with(mock_wrapped, name=FOO)
-        reset_mocks()
-        self.task_pool._counter = count
-        self.task_pool._enough_room._value = room
-        del self.task_pool._running[count]
-
-        mock_awaitable = mock_coroutine()
-        mock_create_task.side_effect = test_exception = TestException()
-        with self.assertRaises(TestException) as e:
-            await self.task_pool._start_task(mock_awaitable, ignore_closed,
-                                             end_callback=mock_end_cb, cancel_callback=mock_cancel_cb)
-            self.assertEqual(test_exception, e)
-        await mock_awaitable
-        self.assertEqual(count + 1, self.task_pool._counter)
-        self.assertNotIn(count, self.task_pool._running)
-        self.assertEqual(room, self.task_pool._enough_room._value)
-        mock__task_name.assert_called_once_with(count)
-        mock__task_wrapper.assert_called_once_with(mock_awaitable, count, mock_end_cb, mock_cancel_cb)
-        mock_create_task.assert_called_once_with(mock_wrapped, name=FOO)
+        mock__task_wrapper.assert_called_once_with(mock_coroutine, count, mock_end_cb, mock_cancel_cb)
+        mock_create_task.assert_called_once_with(coro=mock_wrapped, name=FOO)
+        self.assertEqual(mock_task, self.task_pool._tasks_running[count])
+        mock_group_reg.__aexit__.assert_awaited_once()
 
     @patch.object(pool.BaseTaskPool, '_task_name', return_value=FOO)
     def test__get_running_task(self, mock__task_name: MagicMock):
         task_id, mock_task = 555, MagicMock()
-        self.task_pool._running[task_id] = mock_task
+        self.task_pool._tasks_running[task_id] = mock_task
         output = self.task_pool._get_running_task(task_id)
         self.assertEqual(mock_task, output)
 
-        self.task_pool._cancelled[task_id] = self.task_pool._running.pop(task_id)
+        self.task_pool._tasks_cancelled[task_id] = self.task_pool._tasks_running.pop(task_id)
         with self.assertRaises(exceptions.AlreadyCancelled):
             self.task_pool._get_running_task(task_id)
         mock__task_name.assert_called_once_with(task_id)
         mock__task_name.reset_mock()
 
-        self.task_pool._ended[task_id] = self.task_pool._cancelled.pop(task_id)
+        self.task_pool._tasks_ended[task_id] = self.task_pool._tasks_cancelled.pop(task_id)
         with self.assertRaises(exceptions.TaskEnded):
             self.task_pool._get_running_task(task_id)
         mock__task_name.assert_called_once_with(task_id)
         mock__task_name.reset_mock()
 
-        del self.task_pool._ended[task_id]
+        del self.task_pool._tasks_ended[task_id]
         with self.assertRaises(exceptions.InvalidTaskID):
             self.task_pool._get_running_task(task_id)
         mock__task_name.assert_not_called()
@@ -344,263 +330,416 @@ class BaseTaskPoolTestCase(CommonTestCase):
         mock__get_running_task.assert_has_calls([call(task_id1), call(task_id2), call(task_id3)])
         mock_cancel.assert_has_calls([call(msg=FOO), call(msg=FOO), call(msg=FOO)])
 
-    def test_cancel_all(self):
-        mock_task1, mock_task2 = MagicMock(), MagicMock()
-        self.task_pool._running = {1: mock_task1, 2: mock_task2}
-        assert not self.task_pool._interrupt_flag.is_set()
-        self.assertIsNone(self.task_pool.cancel_all(FOO))
-        self.assertTrue(self.task_pool._interrupt_flag.is_set())
-        mock_task1.cancel.assert_called_once_with(msg=FOO)
-        mock_task2.cancel.assert_called_once_with(msg=FOO)
+    def test__cancel_and_remove_all_from_group(self):
+        task_id = 555
+        mock_cancel = MagicMock()
+        self.task_pool._tasks_running[task_id] = MagicMock(cancel=mock_cancel)
+
+        class MockRegister(set, MagicMock):
+            pass
+        self.assertIsNone(self.task_pool._cancel_and_remove_all_from_group(' ', MockRegister({task_id, 'x'}), msg=FOO))
+        mock_cancel.assert_called_once_with(msg=FOO)
+
+    @patch.object(pool.BaseTaskPool, '_cancel_and_remove_all_from_group')
+    async def test_cancel_group(self, mock__cancel_and_remove_all_from_group: MagicMock):
+        mock_grp_aenter, mock_grp_aexit = AsyncMock(), AsyncMock()
+        mock_group_reg = MagicMock(__aenter__=mock_grp_aenter, __aexit__=mock_grp_aexit)
+        self.task_pool._task_groups[FOO] = mock_group_reg
+        with self.assertRaises(exceptions.InvalidGroupName):
+            await self.task_pool.cancel_group(BAR)
+        mock__cancel_and_remove_all_from_group.assert_not_called()
+        mock_grp_aenter.assert_not_called()
+        mock_grp_aexit.assert_not_called()
+        self.assertIsNone(await self.task_pool.cancel_group(FOO, msg=BAR))
+        mock__cancel_and_remove_all_from_group.assert_called_once_with(FOO, mock_group_reg, msg=BAR)
+        mock_grp_aenter.assert_awaited_once_with()
+        mock_grp_aexit.assert_awaited_once()
+
+    @patch.object(pool.BaseTaskPool, '_cancel_and_remove_all_from_group')
+    async def test_cancel_all(self, mock__cancel_and_remove_all_from_group: MagicMock):
+        mock_grp_aenter, mock_grp_aexit = AsyncMock(), AsyncMock()
+        mock_group_reg = MagicMock(__aenter__=mock_grp_aenter, __aexit__=mock_grp_aexit)
+        self.task_pool._task_groups[BAR] = mock_group_reg
+        self.assertIsNone(await self.task_pool.cancel_all(FOO))
+        mock__cancel_and_remove_all_from_group.assert_called_once_with(BAR, mock_group_reg, msg=FOO)
+        mock_grp_aenter.assert_awaited_once_with()
+        mock_grp_aexit.assert_awaited_once()
 
     async def test_flush(self):
-        test_exception = TestException()
-        mock_ended_func, mock_cancelled_func = AsyncMock(return_value=FOO), AsyncMock(side_effect=test_exception)
-        self.task_pool._ended = {123: mock_ended_func()}
-        self.task_pool._cancelled = {456: mock_cancelled_func()}
-        self.task_pool._interrupt_flag.set()
-        output = await self.task_pool.flush(return_exceptions=True)
-        self.assertListEqual([FOO, test_exception], output)
-        self.assertDictEqual(self.task_pool._ended, EMPTY_DICT)
-        self.assertDictEqual(self.task_pool._cancelled, EMPTY_DICT)
-        self.assertFalse(self.task_pool._interrupt_flag.is_set())
+        mock_ended_func, mock_cancelled_func = AsyncMock(), AsyncMock(side_effect=Exception)
+        self.task_pool._tasks_ended = {123: mock_ended_func()}
+        self.task_pool._tasks_cancelled = {456: mock_cancelled_func()}
+        self.assertIsNone(await self.task_pool.flush(return_exceptions=True))
+        mock_ended_func.assert_awaited_once_with()
+        mock_cancelled_func.assert_awaited_once_with()
+        self.assertDictEqual(EMPTY_DICT, self.task_pool._tasks_ended)
+        self.assertDictEqual(EMPTY_DICT, self.task_pool._tasks_cancelled)
 
-        self.task_pool._ended = {123: mock_ended_func()}
-        self.task_pool._cancelled = {456: mock_cancelled_func()}
-        output = await self.task_pool.flush(return_exceptions=True)
-        self.assertListEqual([FOO, test_exception], output)
-        self.assertDictEqual(self.task_pool._ended, EMPTY_DICT)
-        self.assertDictEqual(self.task_pool._cancelled, EMPTY_DICT)
+    async def test_gather_and_close(self):
+        mock_before_gather, mock_running_func = AsyncMock(), AsyncMock()
+        mock_ended_func, mock_cancelled_func = AsyncMock(), AsyncMock(side_effect=Exception)
+        self.task_pool._before_gathering = before_gather = [mock_before_gather()]
+        self.task_pool._tasks_ended = ended = {123: mock_ended_func()}
+        self.task_pool._tasks_cancelled = cancelled = {456: mock_cancelled_func()}
+        self.task_pool._tasks_running = running = {789: mock_running_func()}
 
-    async def test_gather(self):
-        test_exception = TestException()
-        mock_ended_func, mock_cancelled_func = AsyncMock(return_value=FOO), AsyncMock(side_effect=test_exception)
-        mock_running_func = AsyncMock(return_value=BAR)
-        mock_queue_join = AsyncMock()
-        self.task_pool._before_gathering = before_gather = [mock_queue_join()]
-        self.task_pool._ended = ended = {123: mock_ended_func()}
-        self.task_pool._cancelled = cancelled = {456: mock_cancelled_func()}
-        self.task_pool._running = running = {789: mock_running_func()}
-        self.task_pool._interrupt_flag.set()
-
-        assert not self.task_pool._locked
         with self.assertRaises(exceptions.PoolStillUnlocked):
-            await self.task_pool.gather()
-        self.assertDictEqual(self.task_pool._ended, ended)
-        self.assertDictEqual(self.task_pool._cancelled, cancelled)
-        self.assertDictEqual(self.task_pool._running, running)
-        self.assertListEqual(self.task_pool._before_gathering, before_gather)
-        self.assertTrue(self.task_pool._interrupt_flag.is_set())
+            await self.task_pool.gather_and_close()
+        self.assertDictEqual(ended, self.task_pool._tasks_ended)
+        self.assertDictEqual(cancelled, self.task_pool._tasks_cancelled)
+        self.assertDictEqual(running, self.task_pool._tasks_running)
+        self.assertListEqual(before_gather, self.task_pool._before_gathering)
+        self.assertFalse(self.task_pool._closed)
 
         self.task_pool._locked = True
-
-        def check_assertions(output) -> None:
-            self.assertListEqual([FOO, test_exception, BAR], output)
-            self.assertDictEqual(self.task_pool._ended, EMPTY_DICT)
-            self.assertDictEqual(self.task_pool._cancelled, EMPTY_DICT)
-            self.assertDictEqual(self.task_pool._running, EMPTY_DICT)
-            self.assertListEqual(self.task_pool._before_gathering, EMPTY_LIST)
-            self.assertFalse(self.task_pool._interrupt_flag.is_set())
-
-        check_assertions(await self.task_pool.gather(return_exceptions=True))
-
-        self.task_pool._before_gathering = [mock_queue_join()]
-        self.task_pool._ended = {123: mock_ended_func()}
-        self.task_pool._cancelled = {456: mock_cancelled_func()}
-        self.task_pool._running = {789: mock_running_func()}
-        check_assertions(await self.task_pool.gather(return_exceptions=True))
+        self.assertIsNone(await self.task_pool.gather_and_close(return_exceptions=True))
+        mock_before_gather.assert_awaited_once_with()
+        mock_ended_func.assert_awaited_once_with()
+        mock_cancelled_func.assert_awaited_once_with()
+        mock_running_func.assert_awaited_once_with()
+        self.assertDictEqual(EMPTY_DICT, self.task_pool._tasks_ended)
+        self.assertDictEqual(EMPTY_DICT, self.task_pool._tasks_cancelled)
+        self.assertDictEqual(EMPTY_DICT, self.task_pool._tasks_running)
+        self.assertListEqual(EMPTY_LIST, self.task_pool._before_gathering)
+        self.assertTrue(self.task_pool._closed)
 
 
 class TaskPoolTestCase(CommonTestCase):
     TEST_CLASS = pool.TaskPool
     task_pool: pool.TaskPool
 
-    @patch.object(pool.TaskPool, '_start_task')
-    async def test__apply_one(self, mock__start_task: AsyncMock):
-        mock__start_task.return_value = expected_output = 12345
-        mock_awaitable = MagicMock()
-        mock_func = MagicMock(return_value=mock_awaitable)
-        args, kwargs = (FOO, BAR), {'a': 1, 'b': 2}
-        end_cb, cancel_cb = MagicMock(), MagicMock()
-        output = await self.task_pool._apply_one(mock_func, args, kwargs, end_cb, cancel_cb)
+    def setUp(self) -> None:
+        self.base_class_init_patcher = patch.object(pool.BaseTaskPool, '__init__')
+        self.base_class_init = self.base_class_init_patcher.start()
+        super().setUp()
+
+    def tearDown(self) -> None:
+        self.base_class_init_patcher.stop()
+        super().tearDown()
+
+    def test_init(self):
+        self.assertDictEqual(EMPTY_DICT, self.task_pool._group_meta_tasks_running)
+        self.base_class_init.assert_called_once_with(pool_size=self.TEST_POOL_SIZE, name=self.TEST_POOL_NAME)
+
+    def test__cancel_group_meta_tasks(self):
+        mock_task1, mock_task2 = MagicMock(), MagicMock()
+        self.task_pool._group_meta_tasks_running[BAR] = {mock_task1, mock_task2}
+        self.assertIsNone(self.task_pool._cancel_group_meta_tasks(FOO))
+        self.assertDictEqual({BAR: {mock_task1, mock_task2}}, self.task_pool._group_meta_tasks_running)
+        self.assertSetEqual(EMPTY_SET, self.task_pool._meta_tasks_cancelled)
+        mock_task1.cancel.assert_not_called()
+        mock_task2.cancel.assert_not_called()
+
+        self.assertIsNone(self.task_pool._cancel_group_meta_tasks(BAR))
+        self.assertDictEqual(EMPTY_DICT, self.task_pool._group_meta_tasks_running)
+        self.assertSetEqual({mock_task1, mock_task2}, self.task_pool._meta_tasks_cancelled)
+        mock_task1.cancel.assert_called_once_with()
+        mock_task2.cancel.assert_called_once_with()
+
+    @patch.object(pool.BaseTaskPool, '_cancel_and_remove_all_from_group')
+    @patch.object(pool.TaskPool, '_cancel_group_meta_tasks')
+    def test__cancel_and_remove_all_from_group(self, mock__cancel_group_meta_tasks: MagicMock,
+                                               mock_base__cancel_and_remove_all_from_group: MagicMock):
+        group_name, group_reg, msg = 'xyz', MagicMock(), FOO
+        self.assertIsNone(self.task_pool._cancel_and_remove_all_from_group(group_name, group_reg, msg=msg))
+        mock__cancel_group_meta_tasks.assert_called_once_with(group_name)
+        mock_base__cancel_and_remove_all_from_group.assert_called_once_with(group_name, group_reg, msg=msg)
+
+    @patch.object(pool.BaseTaskPool, 'cancel_group')
+    async def test_cancel_group(self, mock_base_cancel_group: AsyncMock):
+        group_name, msg = 'abc', 'xyz'
+        await self.task_pool.cancel_group(group_name, msg=msg)
+        mock_base_cancel_group.assert_awaited_once_with(group_name=group_name, msg=msg)
+
+    @patch.object(pool.BaseTaskPool, 'cancel_all')
+    async def test_cancel_all(self, mock_base_cancel_all: AsyncMock):
+        msg = 'xyz'
+        await self.task_pool.cancel_all(msg=msg)
+        mock_base_cancel_all.assert_awaited_once_with(msg=msg)
+
+    def test__pop_ended_meta_tasks(self):
+        mock_task, mock_done_task1 = MagicMock(done=lambda: False), MagicMock(done=lambda: True)
+        self.task_pool._group_meta_tasks_running[FOO] = {mock_task, mock_done_task1}
+        mock_done_task2, mock_done_task3 = MagicMock(done=lambda: True), MagicMock(done=lambda: True)
+        self.task_pool._group_meta_tasks_running[BAR] = {mock_done_task2, mock_done_task3}
+        expected_output = {mock_done_task1, mock_done_task2, mock_done_task3}
+        output = self.task_pool._pop_ended_meta_tasks()
+        self.assertSetEqual(expected_output, output)
+        self.assertDictEqual({FOO: {mock_task}}, self.task_pool._group_meta_tasks_running)
+
+    @patch.object(pool.TaskPool, '_pop_ended_meta_tasks')
+    @patch.object(pool.BaseTaskPool, 'flush')
+    async def test_flush(self, mock_base_flush: AsyncMock, mock__pop_ended_meta_tasks: MagicMock):
+        mock_ended_meta_task = AsyncMock()
+        mock__pop_ended_meta_tasks.return_value = {mock_ended_meta_task()}
+        mock_cancelled_meta_task = AsyncMock(side_effect=CancelledError)
+        self.task_pool._meta_tasks_cancelled = {mock_cancelled_meta_task()}
+        self.assertIsNone(await self.task_pool.flush(return_exceptions=False))
+        mock_base_flush.assert_awaited_once_with(return_exceptions=False)
+        mock__pop_ended_meta_tasks.assert_called_once_with()
+        mock_ended_meta_task.assert_awaited_once_with()
+        mock_cancelled_meta_task.assert_awaited_once_with()
+        self.assertSetEqual(EMPTY_SET, self.task_pool._meta_tasks_cancelled)
+
+    @patch.object(pool.BaseTaskPool, 'gather_and_close')
+    async def test_gather_and_close(self, mock_base_gather_and_close: AsyncMock):
+        mock_meta_task1, mock_meta_task2 = AsyncMock(), AsyncMock()
+        self.task_pool._group_meta_tasks_running = {FOO: {mock_meta_task1()}, BAR: {mock_meta_task2()}}
+        mock_cancelled_meta_task = AsyncMock(side_effect=CancelledError)
+        self.task_pool._meta_tasks_cancelled = {mock_cancelled_meta_task()}
+        self.assertIsNone(await self.task_pool.gather_and_close(return_exceptions=True))
+        mock_base_gather_and_close.assert_awaited_once_with(return_exceptions=True)
+        mock_meta_task1.assert_awaited_once_with()
+        mock_meta_task2.assert_awaited_once_with()
+        mock_cancelled_meta_task.assert_awaited_once_with()
+        self.assertDictEqual(EMPTY_DICT, self.task_pool._group_meta_tasks_running)
+        self.assertSetEqual(EMPTY_SET, self.task_pool._meta_tasks_cancelled)
+
+    @patch.object(pool, 'datetime')
+    def test__generate_group_name(self, mock_datetime: MagicMock):
+        prefix, func = 'x y z', AsyncMock(__name__=BAR)
+        dt = datetime(1776, 7, 4, 0, 0, 1)
+        mock_datetime.now = MagicMock(return_value=dt)
+        expected_output = f'{prefix}_{BAR}_{dt.strftime(DATETIME_FORMAT)}'
+        output = pool.TaskPool._generate_group_name(prefix, func)
         self.assertEqual(expected_output, output)
-        mock_func.assert_called_once_with(*args, **kwargs)
-        mock__start_task.assert_awaited_once_with(mock_awaitable, end_callback=end_cb, cancel_callback=cancel_cb)
+
+    @patch.object(pool.TaskPool, '_start_task')
+    async def test__apply_num(self, mock__start_task: AsyncMock):
+        group_name = FOO + BAR
+        mock_awaitable = object()
+        mock_func = MagicMock(return_value=mock_awaitable)
+        args, kwargs, num = (FOO, BAR), {'a': 1, 'b': 2}, 3
+        end_cb, cancel_cb = MagicMock(), MagicMock()
+        self.assertIsNone(await self.task_pool._apply_num(group_name, mock_func, args, kwargs, num, end_cb, cancel_cb))
+        mock_func.assert_has_calls(3 * [call(*args, **kwargs)])
+        mock__start_task.assert_has_awaits(3 * [
+            call(mock_awaitable, group_name=group_name, end_callback=end_cb, cancel_callback=cancel_cb)
+        ])
 
         mock_func.reset_mock()
         mock__start_task.reset_mock()
 
-        output = await self.task_pool._apply_one(mock_func, args, None, end_cb, cancel_cb)
-        self.assertEqual(expected_output, output)
-        mock_func.assert_called_once_with(*args)
-        mock__start_task.assert_awaited_once_with(mock_awaitable, end_callback=end_cb, cancel_callback=cancel_cb)
+        self.assertIsNone(await self.task_pool._apply_num(group_name, mock_func, args, None, num, end_cb, cancel_cb))
+        mock_func.assert_has_calls(num * [call(*args)])
+        mock__start_task.assert_has_awaits(num * [
+            call(mock_awaitable, group_name=group_name, end_callback=end_cb, cancel_callback=cancel_cb)
+        ])
 
-    @patch.object(pool.TaskPool, '_apply_one')
-    async def test_apply(self, mock__apply_one: AsyncMock):
-        mock__apply_one.return_value = mock_id = 67890
-        mock_func, num = MagicMock(), 3
+    @patch.object(pool, 'create_task')
+    @patch.object(pool.TaskPool, '_apply_num', new_callable=MagicMock())
+    @patch.object(pool, 'TaskGroupRegister')
+    @patch.object(pool.TaskPool, '_generate_group_name')
+    @patch.object(pool.BaseTaskPool, '_check_start')
+    async def test_apply(self, mock__check_start: MagicMock, mock__generate_group_name: MagicMock,
+                         mock_reg_cls: MagicMock, mock__apply_num: MagicMock, mock_create_task: MagicMock):
+        mock__generate_group_name.return_value = generated_name = 'name 123'
+        mock_group_reg = set_up_mock_group_register(mock_reg_cls)
+        mock__apply_num.return_value = mock_apply_coroutine = object()
+        mock_task_future = AsyncMock()
+        mock_create_task.return_value = mock_task_future()
+        mock_func, num, group_name = MagicMock(), 3, FOO + BAR
         args, kwargs = (FOO, BAR), {'a': 1, 'b': 2}
         end_cb, cancel_cb = MagicMock(), MagicMock()
-        expected_output = num * [mock_id]
-        output = await self.task_pool.apply(mock_func, args, kwargs, num, end_cb, cancel_cb)
-        self.assertEqual(expected_output, output)
-        mock__apply_one.assert_has_awaits(num * [call(mock_func, args, kwargs, end_cb, cancel_cb)])
+        self.task_pool._task_groups = {}
 
-    async def test__queue_producer(self):
+        def check_assertions(_group_name, _output):
+            self.assertEqual(_group_name, _output)
+            mock__check_start.assert_called_once_with(function=mock_func)
+            self.assertEqual(mock_group_reg, self.task_pool._task_groups[_group_name])
+            mock_group_reg.__aenter__.assert_awaited_once_with()
+            mock__apply_num.assert_called_once_with(_group_name, mock_func, args, kwargs, num, end_cb, cancel_cb)
+            mock_create_task.assert_called_once_with(mock_apply_coroutine)
+            mock_group_reg.__aexit__.assert_awaited_once()
+            mock_task_future.assert_awaited_once_with()
+
+        output = await self.task_pool.apply(mock_func, args, kwargs, num, group_name, end_cb, cancel_cb)
+        check_assertions(group_name, output)
+        mock__generate_group_name.assert_not_called()
+
+        mock__check_start.reset_mock()
+        self.task_pool._task_groups.clear()
+        mock_group_reg.__aenter__.reset_mock()
+        mock__apply_num.reset_mock()
+        mock_create_task.reset_mock()
+        mock_group_reg.__aexit__.reset_mock()
+        mock_task_future = AsyncMock()
+        mock_create_task.return_value = mock_task_future()
+
+        output = await self.task_pool.apply(mock_func, args, kwargs, num, None, end_cb, cancel_cb)
+        check_assertions(generated_name, output)
+        mock__generate_group_name.assert_called_once_with('apply', mock_func)
+
+    @patch.object(pool, 'Queue')
+    async def test__queue_producer(self, mock_queue_cls: MagicMock):
         mock_put = AsyncMock()
-        mock_q = MagicMock(put=mock_put)
-        args = (FOO, BAR, 123)
-        assert not self.task_pool._interrupt_flag.is_set()
-        self.assertIsNone(await self.task_pool._queue_producer(mock_q, args))
-        mock_put.assert_has_awaits([call(arg) for arg in args])
+        mock_queue_cls.return_value = mock_queue = MagicMock(put=mock_put)
+        item1, item2, item3 = FOO, 420, 69
+        arg_iter = iter([item1, item2, item3])
+        self.assertIsNone(await self.task_pool._queue_producer(mock_queue, arg_iter, FOO + BAR))
+        mock_put.assert_has_awaits([call(item1), call(item2), call(item3), call(pool.TaskPool._QUEUE_END_SENTINEL)])
+        with self.assertRaises(StopIteration):
+            next(arg_iter)
+
         mock_put.reset_mock()
-        self.task_pool._interrupt_flag.set()
-        self.assertIsNone(await self.task_pool._queue_producer(mock_q, args))
-        mock_put.assert_not_awaited()
 
-    @patch.object(pool, 'partial')
-    @patch.object(pool, 'star_function')
-    @patch.object(pool.TaskPool, '_start_task')
-    async def test__queue_consumer(self, mock__start_task: AsyncMock, mock_star_function: MagicMock,
-                                   mock_partial: MagicMock):
-        mock_partial.return_value = queue_callback = 'not really'
-        mock_star_function.return_value = awaitable = 'totally an awaitable'
-        q, arg = Queue(), 420.69
-        q.put_nowait(arg)
-        mock_func, stars = MagicMock(), 3
-        mock_flag, end_cb, cancel_cb = MagicMock(), MagicMock(), MagicMock()
-        self.assertIsNone(await self.task_pool._queue_consumer(q, mock_flag, mock_func, stars, end_cb, cancel_cb))
-        self.assertTrue(q.empty())
-        mock__start_task.assert_awaited_once_with(awaitable, ignore_lock=True,
-                                                  end_callback=queue_callback, cancel_callback=cancel_cb)
-        mock_star_function.assert_called_once_with(mock_func, arg, arg_stars=stars)
-        mock_partial.assert_called_once_with(pool.TaskPool._queue_callback, self.task_pool,
-                                             q=q, first_batch_started=mock_flag, func=mock_func, arg_stars=stars,
-                                             end_callback=end_cb, cancel_callback=cancel_cb)
-        mock__start_task.reset_mock()
-        mock_star_function.reset_mock()
-        mock_partial.reset_mock()
-
-        self.assertIsNone(await self.task_pool._queue_consumer(q, mock_flag, mock_func, stars, end_cb, cancel_cb))
-        self.assertTrue(q.empty())
-        mock__start_task.assert_not_awaited()
-        mock_star_function.assert_not_called()
-        mock_partial.assert_not_called()
+        mock_put.side_effect = [CancelledError, None]
+        arg_iter = iter([item1, item2, item3])
+        mock_queue.get_nowait.side_effect = [item2, item3, QueueEmpty]
+        self.assertIsNone(await self.task_pool._queue_producer(mock_queue, arg_iter, FOO + BAR))
+        mock_put.assert_has_awaits([call(item1), call(pool.TaskPool._QUEUE_END_SENTINEL)])
+        mock_queue.get_nowait.assert_has_calls([call(), call(), call()])
+        mock_queue.item_processed.assert_has_calls([call(), call()])
+        self.assertListEqual([item2, item3], list(arg_iter))
 
     @patch.object(pool, 'execute_optional')
-    @patch.object(pool.TaskPool, '_queue_consumer')
-    async def test__queue_callback(self, mock__queue_consumer: AsyncMock, mock_execute_optional: AsyncMock):
-        task_id, mock_q = 420, MagicMock()
-        mock_func, stars = MagicMock(), 3
-        mock_wait = AsyncMock()
-        mock_flag = MagicMock(wait=mock_wait)
-        end_cb, cancel_cb = MagicMock(), MagicMock()
-        self.assertIsNone(await self.task_pool._queue_callback(task_id, mock_q, mock_flag, mock_func, stars,
-                                                               end_callback=end_cb, cancel_callback=cancel_cb))
-        mock_wait.assert_awaited_once_with()
-        mock__queue_consumer.assert_awaited_once_with(mock_q, mock_flag, mock_func, stars,
-                                                      end_callback=end_cb, cancel_callback=cancel_cb)
-        mock_execute_optional.assert_awaited_once_with(end_cb, args=(task_id,))
+    async def test__get_map_end_callback(self, mock_execute_optional: AsyncMock):
+        semaphore, mock_end_cb = Semaphore(1), MagicMock()
+        wrapped = pool.TaskPool._get_map_end_callback(semaphore, mock_end_cb)
+        task_id = 1234
+        await wrapped(task_id)
+        self.assertEqual(2, semaphore._value)
+        mock_execute_optional.assert_awaited_once_with(mock_end_cb, args=(task_id,))
 
-    @patch.object(pool, 'iter')
+    @patch.object(pool, 'star_function')
+    @patch.object(pool.TaskPool, '_start_task')
+    @patch.object(pool, 'Semaphore')
+    @patch.object(pool.TaskPool, '_get_map_end_callback')
+    async def test__queue_consumer(self, mock__get_map_end_callback: MagicMock, mock_semaphore_cls: MagicMock,
+                                   mock__start_task: AsyncMock, mock_star_function: MagicMock):
+        mock__get_map_end_callback.return_value = map_cb = MagicMock()
+        mock_semaphore_cls.return_value = semaphore = Semaphore(3)
+        mock_star_function.return_value = awaitable = 'totally an awaitable'
+        arg1, arg2 = 123456789, 'function argument'
+        mock_q_maxsize = 3
+        mock_q = MagicMock(__aenter__=AsyncMock(side_effect=[arg1, arg2, pool.TaskPool._QUEUE_END_SENTINEL]),
+                           __aexit__=AsyncMock(), maxsize=mock_q_maxsize)
+        group_name, mock_func, stars = 'whatever', MagicMock(), 3
+        end_cb, cancel_cb = MagicMock(), MagicMock()
+        self.assertIsNone(await self.task_pool._queue_consumer(mock_q, group_name, mock_func, stars, end_cb, cancel_cb))
+        self.assertTrue(semaphore.locked())
+        mock__get_map_end_callback.assert_called_once_with(semaphore, actual_end_callback=end_cb)
+        mock__start_task.assert_has_awaits(2 * [
+            call(awaitable, group_name=group_name, ignore_lock=True, end_callback=map_cb, cancel_callback=cancel_cb)
+        ])
+        mock_star_function.assert_has_calls([
+            call(mock_func, arg1, arg_stars=stars),
+            call(mock_func, arg2, arg_stars=stars)
+        ])
+
     @patch.object(pool, 'create_task')
-    @patch.object(pool, 'join_queue', new_callable=MagicMock)
+    @patch.object(pool.TaskPool, '_queue_consumer', new_callable=MagicMock)
     @patch.object(pool.TaskPool, '_queue_producer', new_callable=MagicMock)
-    async def test__set_up_args_queue(self, mock__queue_producer: MagicMock, mock_join_queue: MagicMock,
-                                      mock_create_task: MagicMock, mock_iter: MagicMock):
-        args, num_tasks = (FOO, BAR, 1, 2, 3), 2
-        mock_join_queue.return_value = mock_join = 'awaitable'
-        mock_iter.return_value = args_iter = iter(args)
-        mock__queue_producer.return_value = mock_producer_coro = 'very awaitable'
-        output_q = self.task_pool._set_up_args_queue(args, num_tasks)
-        self.assertIsInstance(output_q, Queue)
-        self.assertEqual(num_tasks, output_q.qsize())
-        for arg in args[:num_tasks]:
-            self.assertEqual(arg, output_q.get_nowait())
-        self.assertTrue(output_q.empty())
-        for arg in args[num_tasks:]:
-            self.assertEqual(arg, next(args_iter))
-        with self.assertRaises(StopIteration):
-            next(args_iter)
-        self.assertListEqual([mock_join], self.task_pool._before_gathering)
-        mock_join_queue.assert_called_once_with(output_q)
-        mock__queue_producer.assert_called_once_with(output_q, args_iter)
-        mock_create_task.assert_called_once_with(mock_producer_coro)
+    @patch.object(pool, 'join_queue', new_callable=MagicMock)
+    @patch.object(pool, 'Queue')
+    @patch.object(pool, 'TaskGroupRegister')
+    @patch.object(pool.BaseTaskPool, '_check_start')
+    async def test__map(self, mock__check_start: MagicMock, mock_reg_cls: MagicMock, mock_queue_cls: MagicMock,
+                        mock_join_queue: MagicMock, mock__queue_producer: MagicMock, mock__queue_consumer: MagicMock,
+                        mock_create_task: MagicMock):
+        mock_group_reg = set_up_mock_group_register(mock_reg_cls)
+        mock_queue_cls.return_value = mock_q = MagicMock()
+        mock_join_queue.return_value = fake_join = object()
+        mock__queue_producer.return_value = fake_producer = object()
+        mock__queue_consumer.return_value = fake_consumer = object()
+        fake_task1, fake_task2 = object(), object()
+        mock_create_task.side_effect = [fake_task1, fake_task2]
 
-        self.task_pool._before_gathering.clear()
-        mock_join_queue.reset_mock()
-        mock__queue_producer.reset_mock()
-        mock_create_task.reset_mock()
-
-        num_tasks = 6
-        mock_iter.return_value = args_iter = iter(args)
-        output_q = self.task_pool._set_up_args_queue(args, num_tasks)
-        self.assertIsInstance(output_q, Queue)
-        self.assertEqual(len(args), output_q.qsize())
-        for arg in args:
-            self.assertEqual(arg, output_q.get_nowait())
-        self.assertTrue(output_q.empty())
-        with self.assertRaises(StopIteration):
-            next(args_iter)
-        self.assertListEqual([mock_join], self.task_pool._before_gathering)
-        mock_join_queue.assert_called_once_with(output_q)
-        mock__queue_producer.assert_not_called()
-        mock_create_task.assert_not_called()
-
-    @patch.object(pool, 'Event')
-    @patch.object(pool.TaskPool, '_queue_consumer')
-    @patch.object(pool.TaskPool, '_set_up_args_queue')
-    async def test__map(self, mock__set_up_args_queue: MagicMock, mock__queue_consumer: AsyncMock,
-                        mock_event_cls: MagicMock):
-        qsize = 4
-        mock__set_up_args_queue.return_value = mock_q = MagicMock(qsize=MagicMock(return_value=qsize))
-        mock_flag_set = MagicMock()
-        mock_event_cls.return_value = mock_flag = MagicMock(set=mock_flag_set)
-
-        mock_func, stars = MagicMock(), 3
-        args_iter, group_size = (FOO, BAR, 1, 2, 3), 2
+        group_name, group_size = 'onetwothree', 0
+        func, arg_iter, stars = AsyncMock(), [55, 66, 77], 3
         end_cb, cancel_cb = MagicMock(), MagicMock()
 
-        self.task_pool._locked = False
-        with self.assertRaises(exceptions.PoolIsLocked):
-            await self.task_pool._map(mock_func, args_iter, stars, group_size, end_cb, cancel_cb)
-        mock__set_up_args_queue.assert_not_called()
-        mock__queue_consumer.assert_not_awaited()
-        mock_flag_set.assert_not_called()
+        with self.assertRaises(ValueError):
+            await self.task_pool._map(group_name, group_size, func, arg_iter, stars, end_cb, cancel_cb)
+        mock__check_start.assert_called_once_with(function=func)
 
-        self.task_pool._locked = True
-        self.assertIsNone(await self.task_pool._map(mock_func, args_iter, stars, group_size, end_cb, cancel_cb))
-        mock__set_up_args_queue.assert_called_once_with(args_iter, group_size)
-        mock__queue_consumer.assert_has_awaits(qsize * [call(mock_q, mock_flag, mock_func, arg_stars=stars,
-                                                             end_callback=end_cb, cancel_callback=cancel_cb)])
-        mock_flag_set.assert_called_once_with()
+        mock__check_start.reset_mock()
+
+        group_size = 1234
+        self.task_pool._task_groups = {group_name: MagicMock()}
+
+        with self.assertRaises(exceptions.InvalidGroupName):
+            await self.task_pool._map(group_name, group_size, func, arg_iter, stars, end_cb, cancel_cb)
+        mock__check_start.assert_called_once_with(function=func)
+
+        mock__check_start.reset_mock()
+
+        self.task_pool._task_groups.clear()
+        self.task_pool._before_gathering = []
+
+        self.assertIsNone(await self.task_pool._map(group_name, group_size, func, arg_iter, stars, end_cb, cancel_cb))
+        mock__check_start.assert_called_once_with(function=func)
+        mock_reg_cls.assert_called_once_with()
+        self.task_pool._task_groups[group_name] = mock_group_reg
+        mock_group_reg.__aenter__.assert_awaited_once_with()
+        mock_queue_cls.assert_called_once_with(maxsize=group_size)
+        mock_join_queue.assert_called_once_with(mock_q)
+        self.assertListEqual([fake_join], self.task_pool._before_gathering)
+        mock__queue_producer.assert_called_once()
+        mock__queue_consumer.assert_called_once_with(mock_q, group_name, func, stars, end_cb, cancel_cb)
+        mock_create_task.assert_has_calls([call(fake_producer), call(fake_consumer)])
+        self.assertSetEqual({fake_task1, fake_task2}, self.task_pool._group_meta_tasks_running[group_name])
+        mock_group_reg.__aexit__.assert_awaited_once()
 
     @patch.object(pool.TaskPool, '_map')
-    async def test_map(self, mock__map: AsyncMock):
+    @patch.object(pool.TaskPool, '_generate_group_name')
+    async def test_map(self, mock__generate_group_name: MagicMock, mock__map: AsyncMock):
+        mock__generate_group_name.return_value = generated_name = 'name 1 2 3'
         mock_func = MagicMock()
-        arg_iter, group_size = (FOO, BAR, 1, 2, 3), 2
+        arg_iter, group_size, group_name = (FOO, BAR, 1, 2, 3), 2, FOO + BAR
         end_cb, cancel_cb = MagicMock(), MagicMock()
-        self.assertIsNone(await self.task_pool.map(mock_func, arg_iter, group_size, end_cb, cancel_cb))
-        mock__map.assert_awaited_once_with(mock_func, arg_iter, arg_stars=0, group_size=group_size,
+        output = await self.task_pool.map(mock_func, arg_iter, group_size, group_name, end_cb, cancel_cb)
+        self.assertEqual(group_name, output)
+        mock__map.assert_awaited_once_with(group_name, group_size, mock_func, arg_iter, 0,
                                            end_callback=end_cb, cancel_callback=cancel_cb)
+        mock__generate_group_name.assert_not_called()
+
+        mock__map.reset_mock()
+        output = await self.task_pool.map(mock_func, arg_iter, group_size, None, end_cb, cancel_cb)
+        self.assertEqual(generated_name, output)
+        mock__map.assert_awaited_once_with(generated_name, group_size, mock_func, arg_iter, 0,
+                                           end_callback=end_cb, cancel_callback=cancel_cb)
+        mock__generate_group_name.assert_called_once_with('map', mock_func)
 
     @patch.object(pool.TaskPool, '_map')
-    async def test_starmap(self, mock__map: AsyncMock):
+    @patch.object(pool.TaskPool, '_generate_group_name')
+    async def test_starmap(self, mock__generate_group_name: MagicMock, mock__map: AsyncMock):
+        mock__generate_group_name.return_value = generated_name = 'name 1 2 3'
         mock_func = MagicMock()
-        args_iter, group_size = ([FOO], [BAR]), 2
+        args_iter, group_size, group_name = ([FOO], [BAR]), 2, FOO + BAR
         end_cb, cancel_cb = MagicMock(), MagicMock()
-        self.assertIsNone(await self.task_pool.starmap(mock_func, args_iter, group_size, end_cb, cancel_cb))
-        mock__map.assert_awaited_once_with(mock_func, args_iter, arg_stars=1, group_size=group_size,
+        output = await self.task_pool.starmap(mock_func, args_iter, group_size, group_name, end_cb, cancel_cb)
+        self.assertEqual(group_name, output)
+        mock__map.assert_awaited_once_with(group_name, group_size, mock_func, args_iter, 1,
                                            end_callback=end_cb, cancel_callback=cancel_cb)
+        mock__generate_group_name.assert_not_called()
+
+        mock__map.reset_mock()
+        output = await self.task_pool.starmap(mock_func, args_iter, group_size, None, end_cb, cancel_cb)
+        self.assertEqual(generated_name, output)
+        mock__map.assert_awaited_once_with(generated_name, group_size, mock_func, args_iter, 1,
+                                           end_callback=end_cb, cancel_callback=cancel_cb)
+        mock__generate_group_name.assert_called_once_with('starmap', mock_func)
 
     @patch.object(pool.TaskPool, '_map')
-    async def test_doublestarmap(self, mock__map: AsyncMock):
+    @patch.object(pool.TaskPool, '_generate_group_name')
+    async def test_doublestarmap(self, mock__generate_group_name: MagicMock, mock__map: AsyncMock):
+        mock__generate_group_name.return_value = generated_name = 'name 1 2 3'
         mock_func = MagicMock()
-        kwargs_iter, group_size = [{'a': FOO}, {'a': BAR}], 2
+        kwargs_iter, group_size, group_name = [{'a': FOO}, {'a': BAR}], 2, FOO + BAR
         end_cb, cancel_cb = MagicMock(), MagicMock()
-        self.assertIsNone(await self.task_pool.doublestarmap(mock_func, kwargs_iter, group_size, end_cb, cancel_cb))
-        mock__map.assert_awaited_once_with(mock_func, kwargs_iter, arg_stars=2, group_size=group_size,
+        output = await self.task_pool.doublestarmap(mock_func, kwargs_iter, group_size, group_name, end_cb, cancel_cb)
+        self.assertEqual(group_name, output)
+        mock__map.assert_awaited_once_with(group_name, group_size, mock_func, kwargs_iter, 2,
                                            end_callback=end_cb, cancel_callback=cancel_cb)
+        mock__generate_group_name.assert_not_called()
+
+        mock__map.reset_mock()
+        output = await self.task_pool.doublestarmap(mock_func, kwargs_iter, group_size, None, end_cb, cancel_cb)
+        self.assertEqual(generated_name, output)
+        mock__map.assert_awaited_once_with(generated_name, group_size, mock_func, kwargs_iter, 2,
+                                           end_callback=end_cb, cancel_callback=cancel_cb)
+        mock__generate_group_name.assert_called_once_with('doublestarmap', mock_func)
 
 
 class SimpleTaskPoolTestCase(CommonTestCase):
@@ -667,7 +806,7 @@ class SimpleTaskPoolTestCase(CommonTestCase):
     def test_stop(self, mock_cancel: MagicMock):
         num = 2
         id1, id2, id3 = 5, 6, 7
-        self.task_pool._running = {id1: FOO, id2: BAR, id3: FOO + BAR}
+        self.task_pool._tasks_running = {id1: FOO, id2: BAR, id3: FOO + BAR}
         output = self.task_pool.stop(num)
         expected_output = [id3, id2]
         self.assertEqual(expected_output, output)
@@ -689,3 +828,10 @@ class SimpleTaskPoolTestCase(CommonTestCase):
         self.assertEqual(expected_output, output)
         mock_num_running.assert_called_once_with()
         mock_stop.assert_called_once_with(num)
+
+
+def set_up_mock_group_register(mock_reg_cls: MagicMock) -> MagicMock:
+    mock_grp_aenter, mock_grp_aexit, mock_grp_add = AsyncMock(), AsyncMock(), MagicMock()
+    mock_reg_cls.return_value = mock_group_reg = MagicMock(__aenter__=mock_grp_aenter, __aexit__=mock_grp_aexit,
+                                                           add=mock_grp_add)
+    return mock_group_reg

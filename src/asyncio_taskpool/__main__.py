@@ -54,10 +54,10 @@ def parse_cli() -> Dict[str, Any]:
 async def main():
     kwargs = parse_cli()
     if kwargs[CONN_TYPE] == UNIX:
-        client = UnixControlClient(path=kwargs[SOCKET_PATH])
+        client = UnixControlClient(socket_path=kwargs[SOCKET_PATH])
     elif kwargs[CONN_TYPE] == TCP:
         # TODO: Implement the TCP client class
-        client = UnixControlClient(path=kwargs[SOCKET_PATH])
+        client = UnixControlClient(socket_path=kwargs[SOCKET_PATH])
     else:
         print("Invalid connection type", file=sys.stderr)
         sys.exit(2)
