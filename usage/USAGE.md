@@ -2,6 +2,8 @@
 
 ## Minimal example for `SimpleTaskPool`
 
+With a `SimpleTaskPool` the function to execute as well as the arguments with which to execute it must be defined during its initialization (and they cannot be changed later). The only control you have after initialization is how many of such tasks are being run.
+
 The minimum required setup is a "worker" coroutine function that can do something asynchronously, and a main coroutine function that sets up the `SimpleTaskPool`, starts/stops the tasks as desired, and eventually awaits them all. 
 
 The following demo code enables full log output first for additional clarity. It is complete and should work as is.
@@ -32,12 +34,12 @@ async def work(n: int) -> None:
 
 
 async def main() -> None:
-    pool = SimpleTaskPool(work, (5,))  # initializes the pool; no work is being done yet
+    pool = SimpleTaskPool(work, args=(5,))  # initializes the pool; no work is being done yet
     await pool.start(3)  # launches work tasks 0, 1, and 2
     await asyncio.sleep(1.5)  # lets the tasks work for a bit
     await pool.start()  # launches work task 3
     await asyncio.sleep(1.5)  # lets the tasks work for a bit
-    pool.stop(2)  # cancels tasks 3 and 2
+    pool.stop(2)  # cancels tasks 3 and 2 (LIFO order)
     pool.lock()  # required for the last line
     await pool.gather_and_close()  # awaits all tasks, then flushes the pool
 
@@ -114,19 +116,19 @@ async def other_work(a: int, b: int) -> None:
 async def main() -> None:
     # Initialize a new task pool instance and limit its size to 3 tasks.
     pool = TaskPool(3)
-    # Queue up two tasks (IDs 0 and 1) to run concurrently (with the same positional arguments).
+    # Queue up two tasks (IDs 0 and 1) to run concurrently (with the same keyword-arguments).
     print("> Called `apply`")
     await pool.apply(work, kwargs={'start': 100, 'stop': 200, 'step': 10}, num=2)
     # Let the tasks work for a bit.
     await asyncio.sleep(1.5)
     # Now, let us enqueue four more tasks (which will receive IDs 2, 3, 4, and 5), each created with different 
-    # positional arguments by using `starmap`, but have **no more than two of those** run concurrently.
+    # positional arguments by using `starmap`, but we want no more than two of those to run concurrently.
     # Since we set our pool size to 3, and already have two tasks working within the pool,
     # only the first one of these will start immediately (and receive ID 2).
     # The second one will start (with ID 3), only once there is room in the pool,
     # which -- in this example -- will be the case after ID 2 ends.
     # Once there is room in the pool again, the third and fourth will each start (with IDs 4 and 5)
-    # **only** once there is room in the pool **and** no more than one other task of these new ones is running.
+    # only once there is room in the pool and no more than one other task of these new ones is running.
     args_list = [(0, 10), (10, 20), (20, 30), (30, 40)]
     await pool.starmap(other_work, args_list, group_size=2)
     print("> Called `starmap`")
