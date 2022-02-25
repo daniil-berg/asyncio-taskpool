@@ -23,7 +23,7 @@ import logging
 from abc import ABC, abstractmethod
 from asyncio import AbstractServer
 from asyncio.exceptions import CancelledError
-from asyncio.streams import StreamReader, StreamWriter, start_unix_server
+from asyncio.streams import StreamReader, StreamWriter
 from asyncio.tasks import Task, create_task
 from pathlib import Path
 from typing import Optional, Union
@@ -137,11 +137,13 @@ class UnixControlServer(ControlServer):
     _client_class = UnixControlClient
 
     def __init__(self, pool: SimpleTaskPool, **server_kwargs) -> None:
+        from asyncio.streams import start_unix_server
+        self._start_unix_server = start_unix_server
         self._socket_path = Path(server_kwargs.pop('path'))
         super().__init__(pool, **server_kwargs)
 
     async def _get_server_instance(self, client_connected_cb: ConnectedCallbackT, **kwargs) -> AbstractServer:
-        server = await start_unix_server(client_connected_cb, self._socket_path, **kwargs)
+        server = await self._start_unix_server(client_connected_cb, self._socket_path, **kwargs)
         log.debug("Opened socket '%s'", str(self._socket_path))
         return server
 

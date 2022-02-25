@@ -23,7 +23,7 @@ import json
 import shutil
 import sys
 from abc import ABC, abstractmethod
-from asyncio.streams import StreamReader, StreamWriter, open_unix_connection
+from asyncio.streams import StreamReader, StreamWriter
 from pathlib import Path
 from typing import Optional
 
@@ -153,6 +153,8 @@ class UnixControlClient(ControlClient):
 
         The `_socket_path` attribute is set to the `Path` object created from the `socket_path` argument.
         """
+        from asyncio.streams import open_unix_connection
+        self._open_unix_connection = open_unix_connection
         self._socket_path = Path(socket_path)
         super().__init__(**conn_kwargs)
 
@@ -164,7 +166,7 @@ class UnixControlClient(ControlClient):
         otherwise, the stream-reader and -writer tuple is returned.
         """
         try:
-            return await open_unix_connection(self._socket_path, **kwargs)
+            return await self._open_unix_connection(self._socket_path, **kwargs)
         except FileNotFoundError:
             print("No socket at", self._socket_path, file=sys.stderr)
             return None, None
