@@ -23,7 +23,7 @@ Use the main CLI client to interface at the socket.
 import asyncio
 import logging
 
-from asyncio_taskpool import SimpleTaskPool, UnixControlServer
+from asyncio_taskpool import SimpleTaskPool, TCPControlServer
 from asyncio_taskpool.constants import PACKAGE_NAME
 
 
@@ -34,11 +34,11 @@ logging.getLogger(PACKAGE_NAME).addHandler(logging.StreamHandler())
 async def work(item: int) -> None:
     """The non-blocking sleep simulates something like an I/O operation that can be done asynchronously."""
     await asyncio.sleep(1)
-    print("worked on", item)
+    print("worked on", item, flush=True)
 
 
 async def worker(q: asyncio.Queue) -> None:
-    """Simulates doing asynchronous work that takes a little bit of time to finish."""
+    """Simulates doing asynchronous work that takes a bit of time to finish."""
     # We only want the worker to stop, when its task is cancelled; therefore we start an infinite loop.
     while True:
         # We want to block here, until we can get the next item from the queue.
@@ -67,7 +67,7 @@ async def main() -> None:
         q.put_nowait(item)
     pool = SimpleTaskPool(worker, (q,))  # initializes the pool
     await pool.start(3)  # launches three worker tasks
-    control_server_task = await UnixControlServer(pool, path='/tmp/py_asyncio_taskpool.sock').serve_forever()
+    control_server_task = await TCPControlServer(pool, host='127.0.0.1', port=9999).serve_forever()
     # We block until `.task_done()` has been called once by our workers for every item placed into the queue.
     await q.join()
     # Since we don't need any "work" done anymore, we can lock our control server by cancelling the task.
@@ -76,7 +76,7 @@ async def main() -> None:
     # we can now safely cancel their tasks.
     pool.lock()
     pool.stop_all()
-    # Finally we allow for all tasks to do do their cleanup, if they need to do any, upon being cancelled.
+    # Finally, we allow for all tasks to do their cleanup (as if they need to do any) upon being cancelled.
     # We block until they all return or raise an exception, but since we are not interested in any of their exceptions,
     # we just silently collect their exceptions along with their return values.
     await pool.gather_and_close(return_exceptions=True)

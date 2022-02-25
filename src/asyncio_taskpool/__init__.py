@@ -20,4 +20,4 @@ Brings the main classes up to package level for import convenience.
 
 
 from .pool import TaskPool, SimpleTaskPool
-from .server import UnixControlServer
+from .server import TCPControlServer, UnixControlServer

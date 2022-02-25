@@ -23,9 +23,9 @@ import json
 import shutil
 import sys
 from abc import ABC, abstractmethod
-from asyncio.streams import StreamReader, StreamWriter
+from asyncio.streams import StreamReader, StreamWriter, open_connection
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from .constants import CLIENT_EXIT, CLIENT_INFO, SESSION_MSG_BYTES
 from .types import ClientConnT, PathT
@@ -50,8 +50,8 @@ class ControlClient(ABC):
         """
         Tries to connect to a socket using the provided arguments and return the associated reader-writer-pair.
 
-        This method will be invoked by the public `start()` method with the pre-defined internal `_conn_kwargs` (unpacked)
-        as keyword-arguments.
+        This method will be invoked by the public `start()` method with the pre-defined internal `_conn_kwargs`
+        (unpacked) as keyword-arguments.
         This method should return either a tuple of `asyncio.StreamReader` and `asyncio.StreamWriter` or a tuple of
         `None` and `None`, if it failed to establish the defined connection.
         """
@@ -144,15 +144,34 @@ class ControlClient(ABC):
         print("Disconnected from control server.")
 
 
+class TCPControlClient(ControlClient):
+    """Task pool control client that expects a TCP socket to be exposed by the control server."""
+
+    def __init__(self, host: str, port: Union[int, str], **conn_kwargs) -> None:
+        """In addition to what the base class does, `host` and `port` are expected as non-optional arguments."""
+        self._host = host
+        self._port = port
+        super().__init__(**conn_kwargs)
+
+    async def _open_connection(self, **kwargs) -> ClientConnT:
+        """
+        Wrapper around the `asyncio.open_connection` function.
+
+        Returns a tuple of `None` and `None`, if the connection can not be established;
+        otherwise, the stream-reader and -writer tuple is returned.
+        """
+        try:
+            return await open_connection(self._host, self._port, **kwargs)
+        except ConnectionError as e:
+            print(str(e), file=sys.stderr)
+            return None, None
+
+
 class UnixControlClient(ControlClient):
     """Task pool control client that expects a unix socket to be exposed by the control server."""
 
     def __init__(self, socket_path: PathT, **conn_kwargs) -> None:
-        """
-        In addition to what the base class does, the `socket_path` is expected as a non-optional argument.
-
-        The `_socket_path` attribute is set to the `Path` object created from the `socket_path` argument.
-        """
+        """In addition to what the base class does, the `socket_path` is expected as a non-optional argument."""
         from asyncio.streams import open_unix_connection
         self._open_unix_connection = open_unix_connection
         self._socket_path = Path(socket_path)

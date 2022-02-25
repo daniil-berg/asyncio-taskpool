@@ -23,12 +23,12 @@ import logging
 from abc import ABC, abstractmethod
 from asyncio import AbstractServer
 from asyncio.exceptions import CancelledError
-from asyncio.streams import StreamReader, StreamWriter
+from asyncio.streams import StreamReader, StreamWriter, start_server
 from asyncio.tasks import Task, create_task
 from pathlib import Path
 from typing import Optional, Union
 
-from .client import ControlClient, UnixControlClient
+from .client import ControlClient, TCPControlClient, UnixControlClient
 from .pool import TaskPool, SimpleTaskPool
 from .session import ControlSession
 from .types import ConnectedCallbackT
@@ -130,6 +130,24 @@ class ControlServer(ABC):  # TODO: Implement interface for normal TaskPool insta
         log.debug("Starting %s...", self.__class__.__name__)
         self._server = await self._get_server_instance(self._client_connected_cb, **self._server_kwargs)
         return create_task(self._serve_forever())
+
+
+class TCPControlServer(ControlServer):
+    """Task pool control server class that exposes a TCP socket for control clients to connect to."""
+    _client_class = TCPControlClient
+
+    def __init__(self, pool: SimpleTaskPool, **server_kwargs) -> None:
+        self._host = server_kwargs.pop('host')
+        self._port = server_kwargs.pop('port')
+        super().__init__(pool, **server_kwargs)
+
+    async def _get_server_instance(self, client_connected_cb: ConnectedCallbackT, **kwargs) -> AbstractServer:
+        server = await start_server(client_connected_cb, self._host, self._port, **kwargs)
+        log.debug("Opened socket at %s:%s", self._host, self._port)
+        return server
+
+    def _final_callback(self) -> None:
+        log.debug("Closed socket at %s:%s", self._host, self._port)
 
 
 class UnixControlServer(ControlServer):

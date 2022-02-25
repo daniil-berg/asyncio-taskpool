@@ -25,15 +25,16 @@ from asyncio import run
 from pathlib import Path
 from typing import Dict, Any
 
-from .client import ControlClient, UnixControlClient
+from .client import ControlClient, TCPControlClient, UnixControlClient
 from .constants import PACKAGE_NAME
 from .pool import TaskPool
-from .server import ControlServer
+from .server import TCPControlServer, UnixControlServer
 
 
 CONN_TYPE = 'conn_type'
 UNIX, TCP = 'unix', 'tcp'
 SOCKET_PATH = 'path'
+HOST, PORT = 'host', 'port'
 
 
 def parse_cli() -> Dict[str, Any]:
@@ -46,7 +47,18 @@ def parse_cli() -> Dict[str, Any]:
     unix_parser.add_argument(
         SOCKET_PATH,
         type=Path,
-        help=f"Path to the unix socket on which the {ControlServer.__name__} for the {TaskPool.__name__} is listening."
+        help=f"Path to the unix socket on which the {UnixControlServer.__name__} for the {TaskPool.__name__} is "
+             f"listening."
+    )
+    tcp_parser = subparsers.add_parser(TCP, help="Connect via TCP socket")
+    tcp_parser.add_argument(
+        HOST,
+        help=f"IP address or url that the {TCPControlServer.__name__} for the {TaskPool.__name__} is listening on."
+    )
+    tcp_parser.add_argument(
+        PORT,
+        type=int,
+        help=f"Port that the {TCPControlServer.__name__} for the {TaskPool.__name__} is listening on."
     )
     return vars(parser.parse_args())
 
@@ -56,8 +68,7 @@ async def main():
     if kwargs[CONN_TYPE] == UNIX:
         client = UnixControlClient(socket_path=kwargs[SOCKET_PATH])
     elif kwargs[CONN_TYPE] == TCP:
-        # TODO: Implement the TCP client class
-        client = UnixControlClient(socket_path=kwargs[SOCKET_PATH])
+        client = TCPControlClient(host=kwargs[HOST], port=kwargs[PORT])
     else:
         print("Invalid connection type", file=sys.stderr)
         sys.exit(2)
