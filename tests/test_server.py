@@ -21,8 +21,9 @@ Unittests for the `asyncio_taskpool.server` module.
 
 import asyncio
 import logging
+import os
 from pathlib import Path
-from unittest import IsolatedAsyncioTestCase
+from unittest import IsolatedAsyncioTestCase, skipIf
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from asyncio_taskpool import server
@@ -119,6 +120,7 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         mock_create_task.assert_called_once_with(mock_awaitable)
 
 
+@skipIf(os.name == 'nt', "No Unix sockets on Windows :(")
 class UnixControlServerTestCase(IsolatedAsyncioTestCase):
     log_lvl: int
 

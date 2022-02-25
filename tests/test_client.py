@@ -20,10 +20,11 @@ Unittests for the `asyncio_taskpool.client` module.
 
 
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
-from unittest import IsolatedAsyncioTestCase
+from unittest import IsolatedAsyncioTestCase, skipIf
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from asyncio_taskpool import client
@@ -171,6 +172,7 @@ class ControlClientTestCase(IsolatedAsyncioTestCase):
         self.mock_print.assert_called_once_with("Disconnected from control server.")
 
 
+@skipIf(os.name == 'nt', "No Unix sockets on Windows :(")
 class UnixControlClientTestCase(IsolatedAsyncioTestCase):
 
     def setUp(self) -> None:
