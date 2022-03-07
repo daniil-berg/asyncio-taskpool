@@ -178,23 +178,26 @@ class BaseTaskPool:
         """
         return self._enough_room.locked()
 
-    def get_task_group_ids(self, group_name: str) -> Set[int]:
+    def get_group_ids(self, *group_names: str) -> Set[int]:
         """
-        Returns the set of IDs of all tasks in the specified group.
+        Returns the set of IDs of all tasks in the specified groups.
 
         Args:
-            group_name: Must be a name of a task group that exists within the pool.
+            *group_names: Each element must be a name of a task group that exists within the pool.
 
         Returns:
-            Set of integers representing the task IDs belonging to the specified group.
+            Set of integers representing the task IDs belonging to the specified groups.
 
         Raises:
-            `InvalidGroupName` if no task group named `group_name` exists in the pool.
+            `InvalidGroupName` if one of the specified `group_names` does not exist in the pool.
         """
-        try:
-            return set(self._task_groups[group_name])
-        except KeyError:
-            raise exceptions.InvalidGroupName(f"No task group named {group_name} exists in this pool.")
+        ids = set()
+        for name in group_names:
+            try:
+                ids.update(self._task_groups[name])
+            except KeyError:
+                raise exceptions.InvalidGroupName(f"No task group named {name} exists in this pool.")
+        return ids
 
     def _check_start(self, *, awaitable: Awaitable = None, function: CoroutineFunc = None,
                      ignore_lock: bool = False) -> None:

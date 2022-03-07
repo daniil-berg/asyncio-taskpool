@@ -163,12 +163,12 @@ class BaseTaskPoolTestCase(CommonTestCase):
     def test_is_full(self):
         self.assertEqual(self.task_pool._enough_room.locked(), self.task_pool.is_full)
 
-    def test_get_task_group_ids(self):
+    def test_get_group_ids(self):
         group_name, ids = 'abcdef', [1, 2, 3]
         self.task_pool._task_groups[group_name] = MagicMock(__iter__=lambda _: iter(ids))
-        self.assertEqual(set(ids), self.task_pool.get_task_group_ids(group_name))
+        self.assertEqual(set(ids), self.task_pool.get_group_ids(group_name))
         with self.assertRaises(exceptions.InvalidGroupName):
-            self.task_pool.get_task_group_ids('something else')
+            self.task_pool.get_group_ids(group_name, 'something else')
 
     async def test__check_start(self):
         self.task_pool._closed = True
