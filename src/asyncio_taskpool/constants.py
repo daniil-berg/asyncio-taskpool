@@ -37,10 +37,21 @@ class CLIENT_INFO:
 
 class CMD:
     __slots__ = ()
+    # Base commands:
     CMD = 'command'
     NAME = 'name'
     POOL_SIZE = 'pool-size'
+    IS_LOCKED = 'is-locked'
+    LOCK = 'lock'
+    UNLOCK = 'unlock'
     NUM_RUNNING = 'num-running'
+    NUM_CANCELLATIONS = 'num-cancellations'
+    NUM_ENDED = 'num-ended'
+    NUM_FINISHED = 'num-finished'
+    IS_FULL = 'is-full'
+    GET_GROUP_IDS = 'get-group-ids'
+
+    # Simple commands:
     START = 'start'
     STOP = 'stop'
     STOP_ALL = 'stop-all'
