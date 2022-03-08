@@ -151,9 +151,9 @@ class UnixControlServerTestCase(IsolatedAsyncioTestCase):
         self.assertEqual(Path(self.path), self.server._socket_path)
         self.mock_base_init.assert_called_once_with(self.mock_pool, **self.kwargs)
 
-    @patch.object(server, 'start_unix_server')
-    async def test__get_server_instance(self, mock_start_unix_server: AsyncMock):
-        mock_start_unix_server.return_value = expected_output = 'totally_a_server'
+    async def test__get_server_instance(self):
+        expected_output = 'totally_a_server'
+        self.server._start_unix_server = mock_start_unix_server = AsyncMock(return_value=expected_output)
         mock_callback, mock_kwargs = MagicMock(), {'a': 1, 'b': 2}
         args = [mock_callback]
         output = await self.server._get_server_instance(*args, **mock_kwargs)

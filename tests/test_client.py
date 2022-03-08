@@ -190,9 +190,9 @@ class UnixControlClientTestCase(IsolatedAsyncioTestCase):
         self.mock_base_init.assert_called_once_with(**self.kwargs)
 
     @patch.object(client, 'print')
-    @patch.object(client, 'open_unix_connection')
-    async def test__open_connection(self, mock_open_unix_connection: AsyncMock, mock_print: MagicMock):
-        mock_open_unix_connection.return_value = expected_output = 'something'
+    async def test__open_connection(self, mock_print: MagicMock):
+        expected_output = 'something'
+        self.client._open_unix_connection = mock_open_unix_connection = AsyncMock(return_value=expected_output)
         kwargs = {'a': 1, 'b': 2}
         output = await self.client._open_connection(**kwargs)
         self.assertEqual(expected_output, output)
