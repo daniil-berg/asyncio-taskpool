@@ -51,10 +51,6 @@ async def join_queue(q: Queue) -> None:
     await q.join()
 
 
-def tasks_str(num: int) -> str:
-    return "tasks" if num != 1 else "task"
-
-
 def get_first_doc_line(obj: object) -> str:
     return getdoc(obj).strip().split("\n", 1)[0].strip()
 

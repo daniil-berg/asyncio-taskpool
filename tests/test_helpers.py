@@ -87,14 +87,6 @@ class HelpersTestCase(IsolatedAsyncioTestCase):
         self.assertIsNone(await helpers.join_queue(mock_queue))
         mock_join.assert_awaited_once_with()
 
-    def test_task_str(self):
-        self.assertEqual("task", helpers.tasks_str(1))
-        self.assertEqual("tasks", helpers.tasks_str(0))
-        self.assertEqual("tasks", helpers.tasks_str(-1))
-        self.assertEqual("tasks", helpers.tasks_str(2))
-        self.assertEqual("tasks", helpers.tasks_str(-10))
-        self.assertEqual("tasks", helpers.tasks_str(42))
-
     def test_get_first_doc_line(self):
         expected_output = 'foo bar baz'
         mock_obj = MagicMock(__doc__=f"""{expected_output} 

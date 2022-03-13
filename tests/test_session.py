@@ -25,9 +25,9 @@ from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
 from asyncio_taskpool import session
-from asyncio_taskpool.constants import CLIENT_INFO, CMD, SESSION_MSG_BYTES, SESSION_WRITER
-from asyncio_taskpool.exceptions import HelpRequested, NotATaskPool, UnknownTaskPoolClass
-from asyncio_taskpool.pool import BaseTaskPool, TaskPool, SimpleTaskPool
+from asyncio_taskpool.constants import CLIENT_INFO, CMD, SESSION_MSG_BYTES, STREAM_WRITER
+from asyncio_taskpool.exceptions import HelpRequested
+from asyncio_taskpool.pool import SimpleTaskPool
 
 
 FOO, BAR = 'foo', 'bar'
@@ -61,236 +61,105 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         self.assertEqual(self.mock_reader, self.session._reader)
         self.assertEqual(self.mock_writer, self.session._writer)
         self.assertIsNone(self.session._parser)
-        self.assertIsNone(self.session._subparsers)
 
-    def test__add_command(self):
-        expected_output = 123456
-        mock_add_parser = MagicMock(return_value=expected_output)
-        self.session._subparsers = MagicMock(add_parser=mock_add_parser)
-        self.session._parser = MagicMock()
-        name, prog, short_help, long_help = 'abc', None, 'short123', None
-        kwargs = {'x': 1, 'y': 2}
-        output = self.session._add_command(name, prog, short_help, long_help, **kwargs)
-        self.assertEqual(expected_output, output)
-        mock_add_parser.assert_called_once_with(name, prog=name, help=short_help, description=short_help,
-                                                parent=self.session._parser, **kwargs)
+    @patch.object(session, 'return_or_exception')
+    async def test__exec_method_and_respond(self, mock_return_or_exception: AsyncMock):
+        def method(self, arg1, arg2, *var_args, **rest): pass
+        test_arg1, test_arg2, test_var_args, test_rest = 123, 'xyz', [0.1, 0.2, 0.3], {'aaa': 1, 'bbb': 11}
+        kwargs = {'arg1': test_arg1, 'arg2': test_arg2, 'var_args': test_var_args} | test_rest
+        mock_return_or_exception.return_value = None
+        self.assertIsNone(await self.session._exec_method_and_respond(method, **kwargs))
+        mock_return_or_exception.assert_awaited_once_with(
+            method, self.mock_pool, test_arg1, test_arg2, *test_var_args, **test_rest
+        )
+        self.mock_writer.write.assert_called_once_with(session.CMD_OK)
 
-        mock_add_parser.reset_mock()
+    @patch.object(session, 'return_or_exception')
+    async def test__exec_property_and_respond(self, mock_return_or_exception: AsyncMock):
+        def prop_get(_): pass
+        def prop_set(_): pass
+        prop = property(prop_get, prop_set)
+        kwargs = {'value': 'something'}
+        mock_return_or_exception.return_value = None
+        self.assertIsNone(await self.session._exec_property_and_respond(prop, **kwargs))
+        mock_return_or_exception.assert_awaited_once_with(prop_set, self.mock_pool, **kwargs)
+        self.mock_writer.write.assert_called_once_with(session.CMD_OK)
 
-        prog, long_help = 'ffffff', 'so long, wow'
-        output = self.session._add_command(name, prog, short_help, long_help, **kwargs)
-        self.assertEqual(expected_output, output)
-        mock_add_parser.assert_called_once_with(name, prog=prog, help=short_help, description=long_help,
-                                                parent=self.session._parser, **kwargs)
+        mock_return_or_exception.reset_mock()
+        self.mock_writer.write.reset_mock()
 
-        mock_add_parser.reset_mock()
+        mock_return_or_exception.return_value = val = 420.69
+        self.assertIsNone(await self.session._exec_property_and_respond(prop))
+        mock_return_or_exception.assert_awaited_once_with(prop_get, self.mock_pool)
+        self.mock_writer.write.assert_called_once_with(str(val).encode())
 
-        short_help = None
-        output = self.session._add_command(name, prog, short_help, long_help, **kwargs)
-        self.assertEqual(expected_output, output)
-        mock_add_parser.assert_called_once_with(name, prog=prog, help=long_help, description=long_help,
-                                                parent=self.session._parser, **kwargs)
-
-    @patch.object(session, 'get_first_doc_line')
-    @patch.object(session.ControlSession, '_add_command')
-    def test__adding_commands(self, mock__add_command: MagicMock, mock_get_first_doc_line: MagicMock):
-        self.assertIsNone(self.session._add_base_commands())
-        mock__add_command.assert_called()
-        mock_get_first_doc_line.assert_called()
-
-        mock__add_command.reset_mock()
-        mock_get_first_doc_line.reset_mock()
-
-        self.assertIsNone(self.session._add_simple_commands())
-        mock__add_command.assert_called()
-        mock_get_first_doc_line.assert_called()
-
-        with self.assertRaises(NotImplementedError):
-            self.session._add_advanced_commands()
-
-    @patch.object(session.ControlSession, '_add_simple_commands')
-    @patch.object(session.ControlSession, '_add_advanced_commands')
-    @patch.object(session.ControlSession, '_add_base_commands')
-    @patch.object(session, 'CommandParser')
-    def test__init_parser(self, mock_command_parser_cls: MagicMock, mock__add_base_commands: MagicMock,
-                          mock__add_advanced_commands: MagicMock, mock__add_simple_commands: MagicMock):
-        mock_command_parser_cls.return_value = mock_parser = MagicMock()
-        self.session._pool = TaskPool()
-        width = 1234
-        expected_parser_kwargs = {
-            'prog': '',
-            SESSION_WRITER: self.mock_writer,
-            CLIENT_INFO.TERMINAL_WIDTH: width,
-        }
-        self.assertIsNone(self.session._init_parser(width))
-        mock_command_parser_cls.assert_called_once_with(**expected_parser_kwargs)
-        mock_parser.add_subparsers.assert_called_once_with(title="Commands", dest=CMD.CMD)
-        mock__add_base_commands.assert_called_once_with()
-        mock__add_advanced_commands.assert_called_once_with()
-        mock__add_simple_commands.assert_not_called()
-
-        mock_command_parser_cls.reset_mock()
-        mock_parser.add_subparsers.reset_mock()
-        mock__add_base_commands.reset_mock()
-        mock__add_advanced_commands.reset_mock()
-        mock__add_simple_commands.reset_mock()
-
-        async def fake_coroutine(): pass
-
-        self.session._pool = SimpleTaskPool(fake_coroutine)
-        self.assertIsNone(self.session._init_parser(width))
-        mock_command_parser_cls.assert_called_once_with(**expected_parser_kwargs)
-        mock_parser.add_subparsers.assert_called_once_with(title="Commands", dest=CMD.CMD)
-        mock__add_base_commands.assert_called_once_with()
-        mock__add_advanced_commands.assert_not_called()
-        mock__add_simple_commands.assert_called_once_with()
-
-        mock_command_parser_cls.reset_mock()
-        mock_parser.add_subparsers.reset_mock()
-        mock__add_base_commands.reset_mock()
-        mock__add_advanced_commands.reset_mock()
-        mock__add_simple_commands.reset_mock()
-
-        class FakeTaskPool(BaseTaskPool):
-            pass
-
-        self.session._pool = FakeTaskPool()
-        with self.assertRaises(UnknownTaskPoolClass):
-            self.session._init_parser(width)
-        mock_command_parser_cls.assert_called_once_with(**expected_parser_kwargs)
-        mock_parser.add_subparsers.assert_called_once_with(title="Commands", dest=CMD.CMD)
-        mock__add_base_commands.assert_called_once_with()
-        mock__add_advanced_commands.assert_not_called()
-        mock__add_simple_commands.assert_not_called()
-
-        mock_command_parser_cls.reset_mock()
-        mock_parser.add_subparsers.reset_mock()
-        mock__add_base_commands.reset_mock()
-        mock__add_advanced_commands.reset_mock()
-        mock__add_simple_commands.reset_mock()
-
-        self.session._pool = MagicMock()
-        with self.assertRaises(NotATaskPool):
-            self.session._init_parser(width)
-        mock_command_parser_cls.assert_called_once_with(**expected_parser_kwargs)
-        mock_parser.add_subparsers.assert_called_once_with(title="Commands", dest=CMD.CMD)
-        mock__add_base_commands.assert_called_once_with()
-        mock__add_advanced_commands.assert_not_called()
-        mock__add_simple_commands.assert_not_called()
-
-    @patch.object(session.ControlSession, '_init_parser')
-    async def test_client_handshake(self, mock__init_parser: MagicMock):
+    @patch.object(session, 'ControlParser')
+    async def test_client_handshake(self, mock_parser_cls: MagicMock):
+        mock_add_subparsers, mock_add_class_commands = MagicMock(), MagicMock()
+        mock_parser = MagicMock(add_subparsers=mock_add_subparsers, add_class_commands=mock_add_class_commands)
+        mock_parser_cls.return_value = mock_parser
         width = 5678
         msg = ' ' + json.dumps({CLIENT_INFO.TERMINAL_WIDTH: width, FOO: BAR}) + '  '
         mock_read = AsyncMock(return_value=msg.encode())
         self.mock_reader.read = mock_read
         self.mock_writer.drain = AsyncMock()
+        expected_parser_kwargs = {
+            STREAM_WRITER: self.mock_writer,
+            CLIENT_INFO.TERMINAL_WIDTH: width,
+            'prog': '',
+            'usage': f'%(prog)s [-h] [{CMD}] ...'
+        }
+        expected_subparsers_kwargs = {
+            'title': "Commands",
+            'metavar': "(A command followed by '-h' or '--help' will show command-specific help.)"
+        }
         self.assertIsNone(await self.session.client_handshake())
+        self.assertEqual(mock_parser, self.session._parser)
         mock_read.assert_awaited_once_with(SESSION_MSG_BYTES)
-        mock__init_parser.assert_called_once_with(width)
+        mock_parser_cls.assert_called_once_with(**expected_parser_kwargs)
+        mock_add_subparsers.assert_called_once_with(**expected_subparsers_kwargs)
+        mock_add_class_commands.assert_called_once_with(self.mock_pool.__class__)
         self.mock_writer.write.assert_called_once_with(str(self.mock_pool).encode())
         self.mock_writer.drain.assert_awaited_once_with()
 
-    @patch.object(session, 'return_or_exception')
-    async def test__write_function_output(self, mock_return_or_exception: MagicMock):
-        self.mock_writer.write = MagicMock()
-        mock_return_or_exception.return_value = None
-        func, args, kwargs = MagicMock(), (1, 2, 3), {'a': 'A', 'b': 'B'}
-        self.assertIsNone(await self.session._write_function_output(func, *args, **kwargs))
-        mock_return_or_exception.assert_called_once_with(func, *args, **kwargs)
-        self.mock_writer.write.assert_called_once_with(b"ok")
-
-        mock_return_or_exception.reset_mock()
-        self.mock_writer.write.reset_mock()
-
-        mock_return_or_exception.return_value = output = MagicMock()
-        self.assertIsNone(await self.session._write_function_output(func, *args, **kwargs))
-        mock_return_or_exception.assert_called_once_with(func, *args, **kwargs)
-        self.mock_writer.write.assert_called_once_with(str(output).encode())
-
-    @patch.object(session.ControlSession, '_write_function_output')
-    async def test__cmd_name(self, mock__write_function_output: AsyncMock):
-        self.assertIsNone(await self.session._cmd_name())
-        mock__write_function_output.assert_awaited_once_with(self.mock_pool.__class__.__str__, self.session._pool)
-
-    @patch.object(session.ControlSession, '_write_function_output')
-    async def test__cmd_pool_size(self, mock__write_function_output: AsyncMock):
-        num = 12345
-        kwargs = {session.NUM: num, FOO: BAR}
-        self.assertIsNone(await self.session._cmd_pool_size(**kwargs))
-        mock__write_function_output.assert_awaited_once_with(
-            self.mock_pool.__class__.pool_size.fset, self.session._pool, num
-        )
-
-        mock__write_function_output.reset_mock()
-
-        kwargs.pop(session.NUM)
-        self.assertIsNone(await self.session._cmd_pool_size(**kwargs))
-        mock__write_function_output.assert_awaited_once_with(
-            self.mock_pool.__class__.pool_size.fget, self.session._pool
-        )
-
-    @patch.object(session.ControlSession, '_write_function_output')
-    async def test__cmd_num_running(self, mock__write_function_output: AsyncMock):
-        self.assertIsNone(await self.session._cmd_num_running())
-        mock__write_function_output.assert_awaited_once_with(
-            self.mock_pool.__class__.num_running.fget, self.session._pool
-        )
-
-    @patch.object(session.ControlSession, '_write_function_output')
-    async def test__cmd_start(self, mock__write_function_output: AsyncMock):
-        num = 12345
-        kwargs = {session.NUM: num, FOO: BAR}
-        self.assertIsNone(await self.session._cmd_start(**kwargs))
-        mock__write_function_output.assert_awaited_once_with(self.mock_pool.start, num)
-
-    @patch.object(session.ControlSession, '_write_function_output')
-    async def test__cmd_stop(self, mock__write_function_output: AsyncMock):
-        num = 12345
-        kwargs = {session.NUM: num, FOO: BAR}
-        self.assertIsNone(await self.session._cmd_stop(**kwargs))
-        mock__write_function_output.assert_awaited_once_with(self.mock_pool.stop, num)
-
-    @patch.object(session.ControlSession, '_write_function_output')
-    async def test__cmd_stop_all(self, mock__write_function_output: AsyncMock):
-        self.assertIsNone(await self.session._cmd_stop_all())
-        mock__write_function_output.assert_awaited_once_with(self.mock_pool.stop_all)
-
-    @patch.object(session.ControlSession, '_write_function_output')
-    async def test__cmd_func_name(self, mock__write_function_output: AsyncMock):
-        self.assertIsNone(await self.session._cmd_func_name())
-        mock__write_function_output.assert_awaited_once_with(
-            self.mock_pool.__class__.func_name.fget, self.session._pool
-        )
-
-    async def test__execute_command(self):
-        mock_method = AsyncMock()
-        cmd = 'this-is-a-test'
-        setattr(self.session, '_cmd_' + cmd.replace('-', '_'), mock_method)
-        kwargs = {FOO: BAR, 'hello': 'python'}
-        self.assertIsNone(await self.session._execute_command(**{CMD.CMD: cmd}, **kwargs))
-        mock_method.assert_awaited_once_with(**kwargs)
-
-    @patch.object(session.ControlSession, '_execute_command')
-    async def test__parse_command(self, mock__execute_command: AsyncMock):
+    @patch.object(session.ControlSession, '_exec_property_and_respond')
+    @patch.object(session.ControlSession, '_exec_method_and_respond')
+    async def test__parse_command(self, mock__exec_method_and_respond: AsyncMock,
+                                  mock__exec_property_and_respond: AsyncMock):
+        def method(_): pass
+        prop = property(method)
         msg = 'asdf asd as a'
         kwargs = {FOO: BAR, 'hello': 'python'}
-        mock_parse_args = MagicMock(return_value=Namespace(**kwargs))
+        mock_parse_args = MagicMock(return_value=Namespace(**{CMD: method}, **kwargs))
         self.session._parser = MagicMock(parse_args=mock_parse_args)
         self.mock_writer.write = MagicMock()
         self.assertIsNone(await self.session._parse_command(msg))
         mock_parse_args.assert_called_once_with(msg.split(' '))
         self.mock_writer.write.assert_not_called()
-        mock__execute_command.assert_awaited_once_with(**kwargs)
+        mock__exec_method_and_respond.assert_awaited_once_with(method, **kwargs)
+        mock__exec_property_and_respond.assert_not_called()
 
-        mock__execute_command.reset_mock()
+        mock__exec_method_and_respond.reset_mock()
+        mock_parse_args.reset_mock()
+
+        mock_parse_args = MagicMock(return_value=Namespace(**{CMD: prop}, **kwargs))
+        self.session._parser = MagicMock(parse_args=mock_parse_args)
+        self.mock_writer.write = MagicMock()
+        self.assertIsNone(await self.session._parse_command(msg))
+        mock_parse_args.assert_called_once_with(msg.split(' '))
+        self.mock_writer.write.assert_not_called()
+        mock__exec_method_and_respond.assert_not_called()
+        mock__exec_property_and_respond.assert_awaited_once_with(prop, **kwargs)
+
+        mock__exec_property_and_respond.reset_mock()
         mock_parse_args.reset_mock()
 
         mock_parse_args.side_effect = exc = ArgumentError(MagicMock(), "oops")
         self.assertIsNone(await self.session._parse_command(msg))
         mock_parse_args.assert_called_once_with(msg.split(' '))
         self.mock_writer.write.assert_called_once_with(str(exc).encode())
-        mock__execute_command.assert_not_awaited()
+        mock__exec_method_and_respond.assert_not_awaited()
+        mock__exec_property_and_respond.assert_not_awaited()
 
         self.mock_writer.write.reset_mock()
         mock_parse_args.reset_mock()
@@ -299,7 +168,8 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         self.assertIsNone(await self.session._parse_command(msg))
         mock_parse_args.assert_called_once_with(msg.split(' '))
         self.mock_writer.write.assert_not_called()
-        mock__execute_command.assert_not_awaited()
+        mock__exec_method_and_respond.assert_not_awaited()
+        mock__exec_property_and_respond.assert_not_awaited()
 
     @patch.object(session.ControlSession, '_parse_command')
     async def test_listen(self, mock__parse_command: AsyncMock):

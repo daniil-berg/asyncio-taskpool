@@ -27,32 +27,12 @@ DATETIME_FORMAT = '%Y-%m-%d_%H-%M-%S'
 CLIENT_EXIT = 'exit'
 
 SESSION_MSG_BYTES = 1024 * 100
-SESSION_WRITER = 'session_writer'
+
+STREAM_WRITER = 'stream_writer'
+CMD = 'command'
+CMD_OK = b"ok"
 
 
 class CLIENT_INFO:
     __slots__ = ()
     TERMINAL_WIDTH = 'terminal_width'
-
-
-class CMD:
-    __slots__ = ()
-    # Base commands:
-    CMD = 'command'
-    NAME = 'name'
-    POOL_SIZE = 'pool-size'
-    IS_LOCKED = 'is-locked'
-    LOCK = 'lock'
-    UNLOCK = 'unlock'
-    NUM_RUNNING = 'num-running'
-    NUM_CANCELLATIONS = 'num-cancellations'
-    NUM_ENDED = 'num-ended'
-    NUM_FINISHED = 'num-finished'
-    IS_FULL = 'is-full'
-    GET_GROUP_IDS = 'get-group-ids'
-
-    # Simple commands:
-    START = 'start'
-    STOP = 'stop'
-    STOP_ALL = 'stop-all'
-    FUNC_NAME = 'func-name'
