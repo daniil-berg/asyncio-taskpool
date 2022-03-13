@@ -19,5 +19,5 @@ Brings the main classes up to package level for import convenience.
 """
 
 
+from .control.server import TCPControlServer, UnixControlServer
 from .pool import TaskPool, SimpleTaskPool
-from .server import TCPControlServer, UnixControlServer

@@ -120,7 +120,7 @@ class BaseTaskPool:
 
     @property
     def is_locked(self) -> bool:
-        """Returns `True` if more the pool has been locked (see below)."""
+        """Returns `True` if the pool has been locked (see below)."""
         return self._locked
 
     def lock(self) -> None:

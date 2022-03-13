@@ -24,7 +24,7 @@ from inspect import signature
 from unittest import TestCase
 from unittest.mock import MagicMock, call, patch
 
-from asyncio_taskpool import parser
+from asyncio_taskpool.control import parser
 from asyncio_taskpool.exceptions import HelpRequested
 
 

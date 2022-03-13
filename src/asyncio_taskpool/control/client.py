@@ -27,8 +27,8 @@ from asyncio.streams import StreamReader, StreamWriter, open_connection
 from pathlib import Path
 from typing import Optional, Union
 
-from .constants import CLIENT_EXIT, CLIENT_INFO, SESSION_MSG_BYTES
-from .types import ClientConnT, PathT
+from ..constants import CLIENT_EXIT, CLIENT_INFO, SESSION_MSG_BYTES
+from ..types import ClientConnT, PathT
 
 
 class ControlClient(ABC):

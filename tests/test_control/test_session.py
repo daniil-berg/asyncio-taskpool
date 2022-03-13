@@ -24,7 +24,7 @@ from argparse import ArgumentError, Namespace
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
-from asyncio_taskpool import session
+from asyncio_taskpool.control import session
 from asyncio_taskpool.constants import CLIENT_INFO, CMD, SESSION_MSG_BYTES, STREAM_WRITER
 from asyncio_taskpool.exceptions import HelpRequested
 from asyncio_taskpool.pool import SimpleTaskPool
@@ -107,7 +107,7 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
             STREAM_WRITER: self.mock_writer,
             CLIENT_INFO.TERMINAL_WIDTH: width,
             'prog': '',
-            'usage': f'%(prog)s [-h] [{CMD}] ...'
+            'usage': f'[-h] [{CMD}] ...'
         }
         expected_subparsers_kwargs = {
             'title': "Commands",

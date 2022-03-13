@@ -25,9 +25,9 @@ from inspect import Parameter, getmembers, isfunction, signature
 from shutil import get_terminal_size
 from typing import Callable, Container, Dict, Set, Type, TypeVar
 
-from .constants import CLIENT_INFO, CMD, STREAM_WRITER
-from .exceptions import HelpRequested
-from .helpers import get_first_doc_line
+from ..constants import CLIENT_INFO, CMD, STREAM_WRITER
+from ..exceptions import HelpRequested
+from ..helpers import get_first_doc_line
 
 
 FmtCls = TypeVar('FmtCls', bound=Type[HelpFormatter])

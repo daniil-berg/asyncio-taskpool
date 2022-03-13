@@ -28,10 +28,10 @@ from asyncio.tasks import Task, create_task
 from pathlib import Path
 from typing import Optional, Union
 
+from ..pool import TaskPool, SimpleTaskPool
+from ..types import ConnectedCallbackT
 from .client import ControlClient, TCPControlClient, UnixControlClient
-from .pool import TaskPool, SimpleTaskPool
 from .session import ControlSession
-from .types import ConnectedCallbackT
 
 
 log = logging.getLogger(__name__)

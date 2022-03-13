@@ -26,10 +26,10 @@ from asyncio.streams import StreamReader, StreamWriter
 from inspect import isfunction, signature
 from typing import Callable, Optional, Union, TYPE_CHECKING
 
-from .constants import CLIENT_INFO, CMD, CMD_OK, SESSION_MSG_BYTES, STREAM_WRITER
-from .exceptions import HelpRequested
-from .helpers import return_or_exception
-from .pool import TaskPool, SimpleTaskPool
+from ..constants import CLIENT_INFO, CMD, CMD_OK, SESSION_MSG_BYTES, STREAM_WRITER
+from ..exceptions import HelpRequested
+from ..helpers import return_or_exception
+from ..pool import TaskPool, SimpleTaskPool
 from .parser import ControlParser
 
 if TYPE_CHECKING:
@@ -131,7 +131,7 @@ class ControlSession:
             STREAM_WRITER: self._writer,
             CLIENT_INFO.TERMINAL_WIDTH: client_info[CLIENT_INFO.TERMINAL_WIDTH],
             'prog': '',
-            'usage': f'%(prog)s [-h] [{CMD}] ...'
+            'usage': f'[-h] [{CMD}] ...'
         }
         self._parser = ControlParser(**parser_kwargs)
         self._parser.add_subparsers(title="Commands",

@@ -27,7 +27,7 @@ from pathlib import Path
 from unittest import IsolatedAsyncioTestCase, skipIf
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from asyncio_taskpool import client
+from asyncio_taskpool.control import client
 from asyncio_taskpool.constants import CLIENT_INFO, SESSION_MSG_BYTES
 
 
@@ -37,7 +37,7 @@ FOO, BAR = 'foo', 'bar'
 class ControlClientTestCase(IsolatedAsyncioTestCase):
 
     def setUp(self) -> None:
-        self.abstract_patcher = patch('asyncio_taskpool.client.ControlClient.__abstractmethods__', set())
+        self.abstract_patcher = patch('asyncio_taskpool.control.client.ControlClient.__abstractmethods__', set())
         self.print_patcher = patch.object(client, 'print')
         self.mock_abstract_methods = self.abstract_patcher.start()
         self.mock_print = self.print_patcher.start()

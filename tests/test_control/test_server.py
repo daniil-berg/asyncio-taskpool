@@ -26,8 +26,8 @@ from pathlib import Path
 from unittest import IsolatedAsyncioTestCase, skipIf
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from asyncio_taskpool import server
-from asyncio_taskpool.client import ControlClient, UnixControlClient
+from asyncio_taskpool.control import server
+from asyncio_taskpool.control.client import ControlClient, UnixControlClient
 
 
 FOO, BAR = 'foo', 'bar'
@@ -46,7 +46,7 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         server.log.setLevel(cls.log_lvl)
 
     def setUp(self) -> None:
-        self.abstract_patcher = patch('asyncio_taskpool.server.ControlServer.__abstractmethods__', set())
+        self.abstract_patcher = patch('asyncio_taskpool.control.server.ControlServer.__abstractmethods__', set())
         self.mock_abstract_methods = self.abstract_patcher.start()
         self.mock_pool = MagicMock()
         self.kwargs = {FOO: 123, BAR: 456}
