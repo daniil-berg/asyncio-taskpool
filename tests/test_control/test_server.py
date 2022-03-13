@@ -27,7 +27,7 @@ from unittest import IsolatedAsyncioTestCase, skipIf
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from asyncio_taskpool.control import server
-from asyncio_taskpool.control.client import ControlClient, UnixControlClient
+from asyncio_taskpool.control.client import ControlClient, TCPControlClient, UnixControlClient
 
 
 FOO, BAR = 'foo', 'bar'
@@ -118,6 +118,50 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         mock__get_server_instance.assert_awaited_once_with(self.server._client_connected_cb, **self.kwargs)
         mock__serve_forever.assert_called_once_with()
         mock_create_task.assert_called_once_with(mock_awaitable)
+
+
+class TCPControlServerTestCase(IsolatedAsyncioTestCase):
+    log_lvl: int
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.log_lvl = server.log.level
+        server.log.setLevel(999)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        server.log.setLevel(cls.log_lvl)
+
+    def setUp(self) -> None:
+        self.base_init_patcher = patch.object(server.ControlServer, '__init__')
+        self.mock_base_init = self.base_init_patcher.start()
+        self.mock_pool = MagicMock()
+        self.host, self.port = 'localhost', 12345
+        self.kwargs = {FOO: 123, BAR: 456}
+        self.server = server.TCPControlServer(pool=self.mock_pool, host=self.host, port=self.port, **self.kwargs)
+
+    def tearDown(self) -> None:
+        self.base_init_patcher.stop()
+
+    def test__client_class(self):
+        self.assertEqual(TCPControlClient, self.server._client_class)
+
+    def test_init(self):
+        self.assertEqual(self.host, self.server._host)
+        self.assertEqual(self.port, self.server._port)
+        self.mock_base_init.assert_called_once_with(self.mock_pool, **self.kwargs)
+
+    @patch.object(server, 'start_server')
+    async def test__get_server_instance(self, mock_start_server: AsyncMock):
+        mock_start_server.return_value = expected_output = 'totally_a_server'
+        mock_callback, mock_kwargs = MagicMock(), {'a': 1, 'b': 2}
+        args = [mock_callback]
+        output = await self.server._get_server_instance(*args, **mock_kwargs)
+        self.assertEqual(expected_output, output)
+        mock_start_server.assert_called_once_with(mock_callback, self.host, self.port, **mock_kwargs)
+
+    def test__final_callback(self):
+        self.assertIsNone(self.server._final_callback())
 
 
 @skipIf(os.name == 'nt', "No Unix sockets on Windows :(")

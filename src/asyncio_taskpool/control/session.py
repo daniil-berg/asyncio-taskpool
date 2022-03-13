@@ -27,7 +27,7 @@ from inspect import isfunction, signature
 from typing import Callable, Optional, Union, TYPE_CHECKING
 
 from ..constants import CLIENT_INFO, CMD, CMD_OK, SESSION_MSG_BYTES, STREAM_WRITER
-from ..exceptions import HelpRequested
+from ..exceptions import CommandError, HelpRequested
 from ..helpers import return_or_exception
 from ..pool import TaskPool, SimpleTaskPool
 from .parser import ControlParser
@@ -163,6 +163,8 @@ class ControlSession:
             await self._exec_method_and_respond(command, **kwargs)
         elif isinstance(command, property):
             await self._exec_property_and_respond(command, **kwargs)
+        else:
+            self._writer.write(str(CommandError(f"Unknown command object: {command}")).encode())
 
     async def listen(self) -> None:
         """

@@ -142,9 +142,7 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         mock__exec_method_and_respond.reset_mock()
         mock_parse_args.reset_mock()
 
-        mock_parse_args = MagicMock(return_value=Namespace(**{CMD: prop}, **kwargs))
-        self.session._parser = MagicMock(parse_args=mock_parse_args)
-        self.mock_writer.write = MagicMock()
+        mock_parse_args.return_value = Namespace(**{CMD: prop}, **kwargs)
         self.assertIsNone(await self.session._parse_command(msg))
         mock_parse_args.assert_called_once_with(msg.split(' '))
         self.mock_writer.write.assert_not_called()
@@ -153,6 +151,21 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
 
         mock__exec_property_and_respond.reset_mock()
         mock_parse_args.reset_mock()
+
+        bad_command = 'definitely not a function or property'
+        mock_parse_args.return_value = Namespace(**{CMD: bad_command}, **kwargs)
+        with patch.object(session, 'CommandError') as cmd_err_cls:
+            cmd_err_cls.return_value = exc = MagicMock()
+            self.assertIsNone(await self.session._parse_command(msg))
+            cmd_err_cls.assert_called_once_with(f"Unknown command object: {bad_command}")
+        mock_parse_args.assert_called_once_with(msg.split(' '))
+        mock__exec_method_and_respond.assert_not_called()
+        mock__exec_property_and_respond.assert_not_called()
+        self.mock_writer.write.assert_called_once_with(str(exc).encode())
+
+        mock__exec_property_and_respond.reset_mock()
+        mock_parse_args.reset_mock()
+        self.mock_writer.write.reset_mock()
 
         mock_parse_args.side_effect = exc = ArgumentError(MagicMock(), "oops")
         self.assertIsNone(await self.session._parse_command(msg))

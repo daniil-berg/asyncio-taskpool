@@ -172,6 +172,43 @@ class ControlClientTestCase(IsolatedAsyncioTestCase):
         self.mock_print.assert_called_once_with("Disconnected from control server.")
 
 
+class TCPControlClientTestCase(IsolatedAsyncioTestCase):
+
+    def setUp(self) -> None:
+        self.base_init_patcher = patch.object(client.ControlClient, '__init__')
+        self.mock_base_init = self.base_init_patcher.start()
+        self.host, self.port = 'localhost', 12345
+        self.kwargs = {FOO: 123, BAR: 456}
+        self.client = client.TCPControlClient(host=self.host, port=self.port, **self.kwargs)
+
+    def tearDown(self) -> None:
+        self.base_init_patcher.stop()
+
+    def test_init(self):
+        self.assertEqual(self.host, self.client._host)
+        self.assertEqual(self.port, self.client._port)
+        self.mock_base_init.assert_called_once_with(**self.kwargs)
+
+    @patch.object(client, 'print')
+    @patch.object(client, 'open_connection')
+    async def test__open_connection(self, mock_open_connection: AsyncMock, mock_print: MagicMock):
+        mock_open_connection.return_value = expected_output = 'something'
+        kwargs = {'a': 1, 'b': 2}
+        output = await self.client._open_connection(**kwargs)
+        self.assertEqual(expected_output, output)
+        mock_open_connection.assert_awaited_once_with(self.host, self.port, **kwargs)
+        mock_print.assert_not_called()
+
+        mock_open_connection.reset_mock()
+
+        mock_open_connection.side_effect = e = ConnectionError()
+        output1, output2 = await self.client._open_connection(**kwargs)
+        self.assertIsNone(output1)
+        self.assertIsNone(output2)
+        mock_open_connection.assert_awaited_once_with(self.host, self.port, **kwargs)
+        mock_print.assert_called_once_with(str(e), file=sys.stderr)
+
+
 @skipIf(os.name == 'nt', "No Unix sockets on Windows :(")
 class UnixControlClientTestCase(IsolatedAsyncioTestCase):
 

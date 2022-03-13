@@ -157,6 +157,14 @@ class ControlServerTestCase(TestCase):
         mock_add_property_command.assert_called_once_with(FooBar.prop, FooBar.__name__, **common_kwargs)
         mock_set_defaults.assert_has_calls([call(**{x: FooBar.method}), call(**{x: FooBar.prop})])
 
+    @patch.object(parser.ArgumentParser, 'add_subparsers')
+    def test_add_subparsers(self, mock_base_add_subparsers: MagicMock):
+        args, kwargs = [1, 2, 42], {FOO: 123, BAR: 456}
+        mock_base_add_subparsers.return_value = mock_action = MagicMock()
+        output = self.parser.add_subparsers(*args, **kwargs)
+        self.assertEqual(mock_action, output)
+        mock_base_add_subparsers.assert_called_once_with(*args, **kwargs)
+
     def test__print_message(self):
         self.stream_writer.write = MagicMock()
         self.assertIsNone(self.parser._print_message(''))

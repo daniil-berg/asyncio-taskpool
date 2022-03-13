@@ -65,3 +65,7 @@ class ServerException(Exception):
 
 class HelpRequested(ServerException):
     pass
+
+
+class CommandError(ServerException):
+    pass
