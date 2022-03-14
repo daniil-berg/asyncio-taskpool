@@ -240,7 +240,7 @@ Keep in mind that the logger and `print` asynchronously write to `stdout`, so th
 
 ## Control server example
 
-One of the main features of `asyncio_taskpool` is the ability to control a task pool "from the outside" at runtime.
+One of the main features of `asyncio-taskpool` is the ability to control a task pool "from the outside" at runtime.
 
 The [example_server.py](./example_server.py) script launches a couple of worker tasks within a `SimpleTaskPool` instance and then starts a `TCPControlServer` instance for that task pool. The server is configured to locally bind to port `9999` and is stopped automatically after the "work" is done.
 
