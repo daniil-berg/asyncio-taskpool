@@ -23,10 +23,10 @@ from argparse import Action, ArgumentParser, ArgumentDefaultsHelpFormatter, Help
 from asyncio.streams import StreamWriter
 from inspect import Parameter, getmembers, isfunction, signature
 from shutil import get_terminal_size
-from typing import Callable, Container, Dict, Set, Type, TypeVar
+from typing import Any, Callable, Container, Dict, Set, Type, TypeVar
 
 from ..constants import CLIENT_INFO, CMD, STREAM_WRITER
-from ..exceptions import HelpRequested
+from ..exceptions import HelpRequested, ParserError
 from ..helpers import get_first_doc_line
 
 
@@ -35,7 +35,6 @@ ParsersDict = Dict[str, 'ControlParser']
 
 OMIT_PARAMS_DEFAULT = ('self', )
 
-FORMATTER_CLASS = 'formatter_class'
 NAME, PROG, HELP, DESCRIPTION = 'name', 'prog', 'help', 'description'
 
 
@@ -79,24 +78,23 @@ class ControlParser(ArgumentParser):
     def __init__(self, stream_writer: StreamWriter, terminal_width: int = None,
                  **kwargs) -> None:
         """
-        Sets additional internal attributes depending on whether a parent-parser was defined.
+        Subclass of the `ArgumentParser` geared towards asynchronous interaction with an object "from the outside".
 
-        The `help_formatter_factory` is called and the returned class is mapped to the `FORMATTER_CLASS` keyword.
-        By default, `exit_on_error` is set to `False` (as opposed to how the parent class handles it).
+        Allows directing output to a specified writer rather than stdout/stderr and setting terminal width explicitly.
 
         Args:
             stream_writer:
                 The instance of the `asyncio.StreamWriter` to use for message output.
             terminal_width (optional):
-                The terminal width to assume for all message formatting. Defaults to `shutil.get_terminal_size`.
+                The terminal width to use for all message formatting. Defaults to `shutil.get_terminal_size().columns`.
             **kwargs(optional):
-                In addition to the regular `ArgumentParser` constructor parameters, this method expects the instance of
-                the `StreamWriter` as well as the terminal width both to be passed explicitly, if the `parent` argument
-                is empty.
+                Passed to the parent class constructor. The exception is the `formatter_class` parameter: Even if a
+                class is specified, it will always be subclassed in the `help_formatter_factory`.
+                Also, by default, `exit_on_error` is set to `False` (as opposed to how the parent class handles it).
         """
         self._stream_writer: StreamWriter = stream_writer
         self._terminal_width: int = terminal_width if terminal_width is not None else get_terminal_size().columns
-        kwargs[FORMATTER_CLASS] = self.help_formatter_factory(self._terminal_width, kwargs.get(FORMATTER_CLASS))
+        kwargs['formatter_class'] = self.help_formatter_factory(self._terminal_width, kwargs.get('formatter_class'))
         kwargs.setdefault('exit_on_error', False)
         super().__init__(**kwargs)
         self._flags: Set[str] = set()
@@ -219,7 +217,7 @@ class ControlParser(ArgumentParser):
     def error(self, message: str) -> None:
         """This just adds the custom `HelpRequested` exception after the parent class' method."""
         super().error(message=message)
-        raise HelpRequested
+        raise ParserError
 
     def print_help(self, file=None) -> None:
         """This just adds the custom `HelpRequested` exception after the parent class' method."""
@@ -267,9 +265,8 @@ class ControlParser(ArgumentParser):
             # This is to be able to later unpack an arbitrary number of positional arguments.
             kwargs.setdefault('nargs', '*')
         if not kwargs.get('action') == 'store_true':
-            # The lambda wrapper around the type annotation is to avoid ValueError being raised on suppressed arguments.
-            # See: https://bugs.python.org/issue36078
-            kwargs.setdefault('type', get_arg_type_wrapper(parameter.annotation))
+            # Set the type from the parameter annotation.
+            kwargs.setdefault('type', _get_arg_type_wrapper(parameter.annotation))
         return self.add_argument(*name_or_flags, **kwargs)
 
     def add_function_args(self, function: Callable, omit: Container[str] = OMIT_PARAMS_DEFAULT) -> None:
@@ -293,7 +290,13 @@ class ControlParser(ArgumentParser):
                 self.add_function_arg(param, help=repr(param.annotation))
 
 
-def get_arg_type_wrapper(cls: Type) -> Callable:
-    def wrapper(arg):
-        return arg if arg is SUPPRESS else cls(arg)
+def _get_arg_type_wrapper(cls: Type) -> Callable[[Any], Any]:
+    """
+    Returns a wrapper for the constructor of `cls` to avoid a ValueError being raised on suppressed arguments.
+
+    See: https://bugs.python.org/issue36078
+    """
+    def wrapper(arg: Any) -> Any: return arg if arg is SUPPRESS else cls(arg)
+    # Copy the name of the class to maintain useful help messages when incorrect arguments are passed.
+    wrapper.__name__ = cls.__name__
     return wrapper

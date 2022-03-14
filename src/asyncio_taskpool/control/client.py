@@ -41,7 +41,7 @@ class ControlClient(ABC):
     """
 
     @staticmethod
-    def client_info() -> dict:
+    def _client_info() -> dict:
         """Returns a dictionary of client information relevant for the handshake with the server."""
         return {CLIENT_INFO.TERMINAL_WIDTH: shutil.get_terminal_size().columns}
 
@@ -73,7 +73,7 @@ class ControlClient(ABC):
             writer: The `asyncio.StreamWriter` returned by the `_open_connection()` method
         """
         self._connected = True
-        writer.write(json.dumps(self.client_info()).encode())
+        writer.write(json.dumps(self._client_info()).encode())
         await writer.drain()
         print("Connected to", (await reader.read(SESSION_MSG_BYTES)).decode())
         print("Type '-h' to get help and usage instructions for all available commands.\n")

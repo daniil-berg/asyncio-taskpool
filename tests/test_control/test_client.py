@@ -55,7 +55,7 @@ class ControlClientTestCase(IsolatedAsyncioTestCase):
 
     def test_client_info(self):
         self.assertEqual({CLIENT_INFO.TERMINAL_WIDTH: shutil.get_terminal_size().columns},
-                         client.ControlClient.client_info())
+                         client.ControlClient._client_info())
 
     async def test_abstract(self):
         with self.assertRaises(NotImplementedError):
@@ -65,12 +65,12 @@ class ControlClientTestCase(IsolatedAsyncioTestCase):
         self.assertEqual(self.kwargs, self.client._conn_kwargs)
         self.assertFalse(self.client._connected)
 
-    @patch.object(client.ControlClient, 'client_info')
-    async def test__server_handshake(self, mock_client_info: MagicMock):
-        mock_client_info.return_value = mock_info = {FOO: 1, BAR: 9999}
+    @patch.object(client.ControlClient, '_client_info')
+    async def test__server_handshake(self, mock__client_info: MagicMock):
+        mock__client_info.return_value = mock_info = {FOO: 1, BAR: 9999}
         self.assertIsNone(await self.client._server_handshake(self.mock_reader, self.mock_writer))
         self.assertTrue(self.client._connected)
-        mock_client_info.assert_called_once_with()
+        mock__client_info.assert_called_once_with()
         self.mock_write.assert_called_once_with(json.dumps(mock_info).encode())
         self.mock_drain.assert_awaited_once_with()
         self.mock_read.assert_awaited_once_with(SESSION_MSG_BYTES)

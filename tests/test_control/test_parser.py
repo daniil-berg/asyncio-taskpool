@@ -25,7 +25,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock, call, patch
 
 from asyncio_taskpool.control import parser
-from asyncio_taskpool.exceptions import HelpRequested
+from asyncio_taskpool.exceptions import HelpRequested, ParserError
 
 
 FOO, BAR = 'foo', 'bar'
@@ -41,7 +41,7 @@ class ControlServerTestCase(TestCase):
         self.kwargs = {
             'stream_writer': self.stream_writer,
             'terminal_width': self.terminal_width,
-            parser.FORMATTER_CLASS: FOO
+            'formatter_class': FOO
         }
         self.parser = parser.ControlParser(**self.kwargs)
 
@@ -183,7 +183,7 @@ class ControlServerTestCase(TestCase):
 
     @patch.object(parser.ArgumentParser, 'error')
     def test_error(self, mock_supercls_error: MagicMock):
-        with self.assertRaises(HelpRequested):
+        with self.assertRaises(ParserError):
             self.parser.error(FOO + BAR)
         mock_supercls_error.assert_called_once_with(message=FOO + BAR)
 
@@ -194,11 +194,11 @@ class ControlServerTestCase(TestCase):
             self.parser.print_help(arg)
         mock_print_help.assert_called_once_with(arg)
 
-    @patch.object(parser, 'get_arg_type_wrapper')
+    @patch.object(parser, '_get_arg_type_wrapper')
     @patch.object(parser.ArgumentParser, 'add_argument')
-    def test_add_function_arg(self, mock_add_argument: MagicMock, mock_get_arg_type_wrapper: MagicMock):
+    def test_add_function_arg(self, mock_add_argument: MagicMock, mock__get_arg_type_wrapper: MagicMock):
         mock_add_argument.return_value = expected_output = 'action'
-        mock_get_arg_type_wrapper.return_value = mock_type = 'fake'
+        mock__get_arg_type_wrapper.return_value = mock_type = 'fake'
 
         foo_type, args_type, bar_type, baz_type, boo_type = tuple, str, int, float, complex
         bar_default, baz_default, boo_default = 1, 0.1, 1j
@@ -211,42 +211,42 @@ class ControlServerTestCase(TestCase):
         kwargs = {FOO + BAR: 'xyz'}
         self.assertEqual(expected_output, self.parser.add_function_arg(param_foo, **kwargs))
         mock_add_argument.assert_called_once_with('foo', type=mock_type, **kwargs)
-        mock_get_arg_type_wrapper.assert_called_once_with(foo_type)
+        mock__get_arg_type_wrapper.assert_called_once_with(foo_type)
 
         mock_add_argument.reset_mock()
-        mock_get_arg_type_wrapper.reset_mock()
+        mock__get_arg_type_wrapper.reset_mock()
 
         self.assertEqual(expected_output, self.parser.add_function_arg(param_args, **kwargs))
         mock_add_argument.assert_called_once_with('args', nargs='*', type=mock_type, **kwargs)
-        mock_get_arg_type_wrapper.assert_called_once_with(args_type)
+        mock__get_arg_type_wrapper.assert_called_once_with(args_type)
 
         mock_add_argument.reset_mock()
-        mock_get_arg_type_wrapper.reset_mock()
+        mock__get_arg_type_wrapper.reset_mock()
 
         self.assertEqual(expected_output, self.parser.add_function_arg(param_bar, **kwargs))
         mock_add_argument.assert_called_once_with('-b', '--bar', default=bar_default, type=mock_type, **kwargs)
-        mock_get_arg_type_wrapper.assert_called_once_with(bar_type)
+        mock__get_arg_type_wrapper.assert_called_once_with(bar_type)
 
         mock_add_argument.reset_mock()
-        mock_get_arg_type_wrapper.reset_mock()
+        mock__get_arg_type_wrapper.reset_mock()
 
         self.assertEqual(expected_output, self.parser.add_function_arg(param_baz, **kwargs))
         mock_add_argument.assert_called_once_with('-B', '--baz', default=baz_default, type=mock_type, **kwargs)
-        mock_get_arg_type_wrapper.assert_called_once_with(baz_type)
+        mock__get_arg_type_wrapper.assert_called_once_with(baz_type)
 
         mock_add_argument.reset_mock()
-        mock_get_arg_type_wrapper.reset_mock()
+        mock__get_arg_type_wrapper.reset_mock()
 
         self.assertEqual(expected_output, self.parser.add_function_arg(param_boo, **kwargs))
         mock_add_argument.assert_called_once_with('--boo', default=boo_default, type=mock_type, **kwargs)
-        mock_get_arg_type_wrapper.assert_called_once_with(boo_type)
+        mock__get_arg_type_wrapper.assert_called_once_with(boo_type)
 
         mock_add_argument.reset_mock()
-        mock_get_arg_type_wrapper.reset_mock()
+        mock__get_arg_type_wrapper.reset_mock()
 
         self.assertEqual(expected_output, self.parser.add_function_arg(param_flag, **kwargs))
         mock_add_argument.assert_called_once_with('-f', '--flag', action='store_true', **kwargs)
-        mock_get_arg_type_wrapper.assert_not_called()
+        mock__get_arg_type_wrapper.assert_not_called()
 
     @patch.object(parser.ControlParser, 'add_function_arg')
     def test_add_function_args(self, mock_add_function_arg: MagicMock):
@@ -261,7 +261,8 @@ class ControlServerTestCase(TestCase):
 
 
 class RestTestCase(TestCase):
-    def test_get_arg_type_wrapper(self):
-        type_wrap = parser.get_arg_type_wrapper(int)
+    def test__get_arg_type_wrapper(self):
+        type_wrap = parser._get_arg_type_wrapper(int)
+        self.assertEqual('int', type_wrap.__name__)
         self.assertEqual(SUPPRESS, type_wrap(SUPPRESS))
         self.assertEqual(13, type_wrap('13'))

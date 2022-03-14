@@ -53,6 +53,6 @@ class Queue(_Queue):
         Implements an asynchronous context manager for the queue.
 
         Upon exiting `item_processed()` is called. This is why this context manager may not always be what you want,
-        but in some situations it makes the codes much cleaner.
+        but in some situations it makes the code much cleaner.
         """
         self.item_processed()

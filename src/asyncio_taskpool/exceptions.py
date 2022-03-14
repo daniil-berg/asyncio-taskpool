@@ -67,5 +67,9 @@ class HelpRequested(ServerException):
     pass
 
 
+class ParserError(ServerException):
+    pass
+
+
 class CommandError(ServerException):
     pass

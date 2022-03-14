@@ -27,7 +27,7 @@ from inspect import isfunction, signature
 from typing import Callable, Optional, Union, TYPE_CHECKING
 
 from ..constants import CLIENT_INFO, CMD, CMD_OK, SESSION_MSG_BYTES, STREAM_WRITER
-from ..exceptions import CommandError, HelpRequested
+from ..exceptions import CommandError, HelpRequested, ParserError
 from ..helpers import return_or_exception
 from ..pool import TaskPool, SimpleTaskPool
 from .parser import ControlParser
@@ -157,7 +157,7 @@ class ControlSession:
             log.debug("%s got an ArgumentError", self._client_class_name)
             self._writer.write(str(e).encode())
             return
-        except HelpRequested:
+        except (HelpRequested, ParserError):
             log.debug("%s received usage help", self._client_class_name)
             return
         command = kwargs.pop(CMD)

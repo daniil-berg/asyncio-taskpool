@@ -15,7 +15,7 @@ You should have received a copy of the GNU Lesser General Public License along w
 If not, see <https://www.gnu.org/licenses/>."""
 
 __doc__ = """
-Miscellaneous helper functions.
+Miscellaneous helper functions. None of these should be considered part of the public API.
 """
 
 
