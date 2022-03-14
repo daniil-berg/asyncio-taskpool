@@ -136,7 +136,7 @@ class TCPControlServer(ControlServer):
     """Task pool control server class that exposes a TCP socket for control clients to connect to."""
     _client_class = TCPControlClient
 
-    def __init__(self, pool: SimpleTaskPool, **server_kwargs) -> None:
+    def __init__(self, pool: Union[TaskPool, SimpleTaskPool], **server_kwargs) -> None:
         self._host = server_kwargs.pop('host')
         self._port = server_kwargs.pop('port')
         super().__init__(pool, **server_kwargs)
@@ -154,7 +154,7 @@ class UnixControlServer(ControlServer):
     """Task pool control server class that exposes a unix socket for control clients to connect to."""
     _client_class = UnixControlClient
 
-    def __init__(self, pool: SimpleTaskPool, **server_kwargs) -> None:
+    def __init__(self, pool: Union[TaskPool, SimpleTaskPool], **server_kwargs) -> None:
         from asyncio.streams import start_unix_server
         self._start_unix_server = start_unix_server
         self._socket_path = Path(server_kwargs.pop('path'))

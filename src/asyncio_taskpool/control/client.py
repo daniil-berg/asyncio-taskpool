@@ -76,6 +76,7 @@ class ControlClient(ABC):
         writer.write(json.dumps(self.client_info()).encode())
         await writer.drain()
         print("Connected to", (await reader.read(SESSION_MSG_BYTES)).decode())
+        print("Type '-h' to get help and usage instructions for all available commands.\n")
 
     def _get_command(self, writer: StreamWriter) -> Optional[str]:
         """

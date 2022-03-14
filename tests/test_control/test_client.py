@@ -25,7 +25,7 @@ import shutil
 import sys
 from pathlib import Path
 from unittest import IsolatedAsyncioTestCase, skipIf
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 from asyncio_taskpool.control import client
 from asyncio_taskpool.constants import CLIENT_INFO, SESSION_MSG_BYTES
@@ -74,7 +74,10 @@ class ControlClientTestCase(IsolatedAsyncioTestCase):
         self.mock_write.assert_called_once_with(json.dumps(mock_info).encode())
         self.mock_drain.assert_awaited_once_with()
         self.mock_read.assert_awaited_once_with(SESSION_MSG_BYTES)
-        self.mock_print.assert_called_once_with("Connected to", self.mock_read.return_value.decode())
+        self.mock_print.assert_has_calls([
+            call("Connected to", self.mock_read.return_value.decode()),
+            call("Type '-h' to get help and usage instructions for all available commands.\n")
+        ])
 
     @patch.object(client, 'input')
     def test__get_command(self, mock_input: MagicMock):

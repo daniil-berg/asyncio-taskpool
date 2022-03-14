@@ -1,14 +1,18 @@
 # Using `asyncio-taskpool`
 
+## Contents
+- [Contents](#contents)
+- [Minimal example for `SimpleTaskPool`](#minimal-example-for-simpletaskpool)
+- [Advanced example for `TaskPool`](#advanced-example-for-taskpool)
+- [Control server example](#control-server-example)
+
 ## Minimal example for `SimpleTaskPool`
 
 With a `SimpleTaskPool` the function to execute as well as the arguments with which to execute it must be defined during its initialization (and they cannot be changed later). The only control you have after initialization is how many of such tasks are being run.
 
 The minimum required setup is a "worker" coroutine function that can do something asynchronously, and a main coroutine function that sets up the `SimpleTaskPool`, starts/stops the tasks as desired, and eventually awaits them all. 
 
-The following demo code enables full log output first for additional clarity. It is complete and should work as is.
-
-### Code
+The following demo script enables full log output first for additional clarity. It is complete and should work as is.
 
 ```python
 import logging
@@ -48,7 +52,9 @@ if __name__ == '__main__':
     asyncio.run(main())
 ```
 
-### Output 
+<details>
+<summary>Output: (Click to expand)</summary>
+
 ```
 SimpleTaskPool-0 initialized
 Started SimpleTaskPool-0_Task-0
@@ -78,6 +84,7 @@ Ended SimpleTaskPool-0_Task-1
 > did 4
 > did 4
 ```
+</details>
 
 ## Advanced example for `TaskPool`
 
@@ -85,9 +92,7 @@ This time, we want to start tasks from _different_ coroutine functions **and** w
 
 As with the simple example, we need "worker" coroutine functions that can do something asynchronously, as well as a main coroutine function that sets up the pool, starts the tasks, and eventually awaits them.
 
-The following demo code enables full log output first for additional clarity. It is complete and should work as is.
-
-### Code
+The following demo script enables full log output first for additional clarity. It is complete and should work as is.
 
 ```python
 import logging
@@ -144,10 +149,9 @@ if __name__ == '__main__':
     asyncio.run(main())
 ```
 
-### Output 
-Additional comments for the output are provided with `<---` next to the output lines.
+<details>
+<summary>Output: (Click to expand)</summary>
 
-(Keep in mind that the logger and `print` asynchronously write to `stdout`.)
 ```
 TaskPool-0 initialized
 Started TaskPool-0_Task-0
@@ -228,5 +232,38 @@ Ended TaskPool-0_Task-4
 Ended TaskPool-0_Task-5
 > Done.
 ```
+
+(Added comments with `<---` next to the output lines.)
+
+Keep in mind that the logger and `print` asynchronously write to `stdout`, so the order of lines in your output may be slightly different.
+</details>
+
+## Control server example
+
+One of the main features of `asyncio_taskpool` is the ability to control a task pool "from the outside" at runtime.
+
+The [example_server.py](./example_server.py) script launches a couple of worker tasks within a `SimpleTaskPool` instance and then starts a `TCPControlServer` instance for that task pool. The server is configured to locally bind to port `9999` and is stopped automatically after the "work" is done.
+
+To run the script:
+```shell
+python usage/example_server.py
+```
+
+You can then connect to the server via the command line interface:
+```shell
+python -m asyncio_taskpool.control tcp localhost 9999
+```
+
+The CLI starts a `TCPControlClient` that connects to our example server. Once the connection is established, it gives you an input prompt allowing you to issue commands to the task pool:
+```
+Connected to SimpleTaskPool-0
+Type '-h' to get help and usage instructions for all available commands.
+
+>
+```
+
+It may be useful to run the server script and the client interface in two separate terminal windows side by side. The server script is configured with a verbose logger and will react to any commands issued by the client with detailed log messages in the terminal.
+
+---
 
 © 2022 Daniil Fajnberg

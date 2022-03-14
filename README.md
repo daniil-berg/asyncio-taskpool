@@ -2,9 +2,18 @@
 
 **Dynamically manage pools of asyncio tasks**
 
+## Contents
+- [Contents](#contents)
+- [Summary](#summary)
+- [Usage](#usage)
+- [Installation](#installation)
+- [Dependencies](#dependencies)
+- [Testing](#testing)
+- [License](#license)
+
 ## Summary
 
-A task pool is an object with a simple interface for aggregating and dynamically managing asynchronous tasks.
+A **task pool** is an object with a simple interface for aggregating and dynamically managing asynchronous tasks.
 
 With an interface that is intentionally similar to the [`multiprocessing.Pool`](https://docs.python.org/3/library/multiprocessing.html#module-multiprocessing.pool) class from the standard library, the `TaskPool` provides you such methods as `apply`, `map`, and `starmap` to execute coroutines concurrently as [`asyncio.Task`](https://docs.python.org/3/library/asyncio-task.html#task-object) objects. There is no limitation imposed on what kind of tasks can be run or in what combination, when new ones can be added, or when they can be cancelled.
 
@@ -22,7 +31,7 @@ from asyncio_taskpool import SimpleTaskPool
 ...
 
 
-async def work(foo, bar): ...
+async def work(_foo, _bar): ...
 
 
 ...
@@ -55,7 +64,7 @@ Python Version 3.8+, tested on Linux
 
 ## Testing
 
-Install `asyncio-taskpool[dev]` dependencies or just manually install `coverage` with `pip`. 
+Install `asyncio-taskpool[dev]` dependencies or just manually install [`coverage`](https://coverage.readthedocs.io/en/latest/) with `pip`. 
 Execute the [`./coverage.sh`](coverage.sh) shell script to run all unit tests and receive the coverage report.
 
 ## License
@@ -64,6 +73,6 @@ Execute the [`./coverage.sh`](coverage.sh) shell script to run all unit tests an
 
 The full license texts for the [GNU GPLv3.0](COPYING) and the [GNU LGPLv3.0](COPYING.LESSER) are included in this repository. If not, see https://www.gnu.org/licenses/.
 
-## Copyright
+---
 
 © 2022 Daniil Fajnberg

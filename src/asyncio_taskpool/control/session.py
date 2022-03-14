@@ -85,7 +85,7 @@ class ControlSession:
                 Must correspond to the arguments expected by the `method`.
                 Correctly unpacks arbitrary-length positional and keyword-arguments.
         """
-        log.warning("%s calls %s.%s", self._client_class_name, self._pool.__class__.__name__, method.__name__)
+        log.debug("%s calls %s.%s", self._client_class_name, self._pool.__class__.__name__, method.__name__)
         normal_pos, var_pos = [], []
         for param in signature(method).parameters.values():
             if param.name == 'self':
@@ -112,11 +112,11 @@ class ControlSession:
                 executed and the response written to the stream will be its return value (as an encoded string).
         """
         if kwargs:
-            log.warning("%s sets %s.%s", self._client_class_name, self._pool.__class__.__name__, prop.fset.__name__)
+            log.debug("%s sets %s.%s", self._client_class_name, self._pool.__class__.__name__, prop.fset.__name__)
             await return_or_exception(prop.fset, self._pool, **kwargs)
             self._writer.write(CMD_OK)
         else:
-            log.warning("%s gets %s.%s", self._client_class_name, self._pool.__class__.__name__, prop.fget.__name__)
+            log.debug("%s gets %s.%s", self._client_class_name, self._pool.__class__.__name__, prop.fget.__name__)
             self._writer.write(str(await return_or_exception(prop.fget, self._pool)).encode())
 
     async def client_handshake(self) -> None:
@@ -154,9 +154,11 @@ class ControlSession:
         try:
             kwargs = vars(self._parser.parse_args(msg.split(' ')))
         except ArgumentError as e:
+            log.debug("%s got an ArgumentError", self._client_class_name)
             self._writer.write(str(e).encode())
             return
         except HelpRequested:
+            log.debug("%s received usage help", self._client_class_name)
             return
         command = kwargs.pop(CMD)
         if isfunction(command):

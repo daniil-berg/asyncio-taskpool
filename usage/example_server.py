@@ -65,12 +65,12 @@ async def main() -> None:
     # We just put some integers into our queue, since all our workers actually do, is print an item and sleep for a bit.
     for item in range(100):
         q.put_nowait(item)
-    pool = SimpleTaskPool(worker, (q,))  # initializes the pool
+    pool = SimpleTaskPool(worker, args=(q,))  # initializes the pool
     await pool.start(3)  # launches three worker tasks
     control_server_task = await TCPControlServer(pool, host='127.0.0.1', port=9999).serve_forever()
     # We block until `.task_done()` has been called once by our workers for every item placed into the queue.
     await q.join()
-    # Since we don't need any "work" done anymore, we can lock our control server by cancelling the task.
+    # Since we don't need any "work" done anymore, we can get rid of our control server by cancelling the task.
     control_server_task.cancel()
     # Since our workers should now be stuck waiting for more items to pick from the queue, but no items are left,
     # we can now safely cancel their tasks.
