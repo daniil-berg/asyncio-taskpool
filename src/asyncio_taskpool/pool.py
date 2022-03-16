@@ -775,8 +775,15 @@ class TaskPool(BaseTaskPool):
                 if next_arg is self._QUEUE_END_SENTINEL:
                     # The `_queue_producer()` either reached the last argument or was cancelled.
                     return
-                await self._start_task(star_function(func, next_arg, arg_stars=arg_stars), group_name=group_name,
-                                       ignore_lock=True, end_callback=release_cb, cancel_callback=cancel_callback)
+                try:
+                    await self._start_task(star_function(func, next_arg, arg_stars=arg_stars), group_name=group_name,
+                                           ignore_lock=True, end_callback=release_cb, cancel_callback=cancel_callback)
+                except Exception as e:
+                    # This means an exception occurred during task **creation**, meaning no task has been created.
+                    # It does not imply an error within the task itself.
+                    log.exception("%s occurred while trying to create task: %s(%s%s)",
+                                  str(e.__class__.__name__), func.__name__, '*' * arg_stars, str(next_arg))
+                    map_semaphore.release()
 
     async def _map(self, group_name: str, group_size: int, func: CoroutineFunc, arg_iter: ArgsT, arg_stars: int,
                    end_callback: EndCB = None, cancel_callback: CancelCB = None) -> None:

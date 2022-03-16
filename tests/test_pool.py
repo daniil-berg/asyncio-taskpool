@@ -603,28 +603,34 @@ class TaskPoolTestCase(CommonTestCase):
 
     @patch.object(pool, 'star_function')
     @patch.object(pool.TaskPool, '_start_task')
-    @patch.object(pool, 'Semaphore')
     @patch.object(pool.TaskPool, '_get_map_end_callback')
-    async def test__queue_consumer(self, mock__get_map_end_callback: MagicMock, mock_semaphore_cls: MagicMock,
+    @patch.object(pool, 'Semaphore')
+    async def test__queue_consumer(self, mock_semaphore_cls: MagicMock, mock__get_map_end_callback: MagicMock,
                                    mock__start_task: AsyncMock, mock_star_function: MagicMock):
-        mock__get_map_end_callback.return_value = map_cb = MagicMock()
         mock_semaphore_cls.return_value = semaphore = Semaphore(3)
-        mock_star_function.return_value = awaitable = 'totally an awaitable'
-        arg1, arg2 = 123456789, 'function argument'
+        mock__get_map_end_callback.return_value = map_cb = MagicMock()
+        awaitable = 'totally an awaitable'
+        mock_star_function.side_effect = [awaitable, awaitable, Exception()]
+        arg1, arg2, bad = 123456789, 'function argument', None
         mock_q_maxsize = 3
-        mock_q = MagicMock(__aenter__=AsyncMock(side_effect=[arg1, arg2, pool.TaskPool._QUEUE_END_SENTINEL]),
+        mock_q = MagicMock(__aenter__=AsyncMock(side_effect=[arg1, arg2, bad, pool.TaskPool._QUEUE_END_SENTINEL]),
                            __aexit__=AsyncMock(), maxsize=mock_q_maxsize)
-        group_name, mock_func, stars = 'whatever', MagicMock(), 3
+        group_name, mock_func, stars = 'whatever', MagicMock(__name__="mock"), 3
         end_cb, cancel_cb = MagicMock(), MagicMock()
         self.assertIsNone(await self.task_pool._queue_consumer(mock_q, group_name, mock_func, stars, end_cb, cancel_cb))
+        # We expect the semaphore to be acquired 3 times, then be released once after the exception occurs, then
+        # acquired once more when the `_QUEUE_END_SENTINEL` is reached. Since we initialized it with a value of 3,
+        # at the end of the loop, we expect it be locked.
         self.assertTrue(semaphore.locked())
+        mock_semaphore_cls.assert_called_once_with(mock_q_maxsize)
         mock__get_map_end_callback.assert_called_once_with(semaphore, actual_end_callback=end_cb)
         mock__start_task.assert_has_awaits(2 * [
             call(awaitable, group_name=group_name, ignore_lock=True, end_callback=map_cb, cancel_callback=cancel_cb)
         ])
         mock_star_function.assert_has_calls([
             call(mock_func, arg1, arg_stars=stars),
-            call(mock_func, arg2, arg_stars=stars)
+            call(mock_func, arg2, arg_stars=stars),
+            call(mock_func, bad, arg_stars=stars)
         ])
 
     @patch.object(pool, 'create_task')
