@@ -20,14 +20,16 @@ This module contains the the definition of the `ControlParser` class used by a c
 
 
 from argparse import Action, ArgumentParser, ArgumentDefaultsHelpFormatter, HelpFormatter, SUPPRESS
+from ast import literal_eval
 from asyncio.streams import StreamWriter
 from inspect import Parameter, getmembers, isfunction, signature
 from shutil import get_terminal_size
-from typing import Any, Callable, Container, Dict, Set, Type, TypeVar
+from typing import Any, Callable, Container, Dict, Iterable, Set, Type, TypeVar
 
 from ..constants import CLIENT_INFO, CMD, STREAM_WRITER
 from ..exceptions import HelpRequested, ParserError
-from ..helpers import get_first_doc_line
+from ..helpers import get_first_doc_line, resolve_dotted_path
+from ..types import ArgsT, CancelCB, CoroutineFunc, EndCB, KwArgsT
 
 
 FmtCls = TypeVar('FmtCls', bound=Type[HelpFormatter])
@@ -266,7 +268,7 @@ class ControlParser(ArgumentParser):
             kwargs.setdefault('nargs', '*')
         if not kwargs.get('action') == 'store_true':
             # Set the type from the parameter annotation.
-            kwargs.setdefault('type', _get_arg_type_wrapper(parameter.annotation))
+            kwargs.setdefault('type', _get_type_from_annotation(parameter.annotation))
         return self.add_argument(*name_or_flags, **kwargs)
 
     def add_function_args(self, function: Callable, omit: Container[str] = OMIT_PARAMS_DEFAULT) -> None:
@@ -300,3 +302,11 @@ def _get_arg_type_wrapper(cls: Type) -> Callable[[Any], Any]:
     # Copy the name of the class to maintain useful help messages when incorrect arguments are passed.
     wrapper.__name__ = cls.__name__
     return wrapper
+
+
+def _get_type_from_annotation(annotation: Type) -> Callable[[Any], Any]:
+    if any(annotation is t for t in {CoroutineFunc, EndCB, CancelCB}):
+        annotation = resolve_dotted_path
+    if any(annotation is t for t in {ArgsT, KwArgsT, Iterable[ArgsT], Iterable[KwArgsT]}):
+        annotation = literal_eval
+    return _get_arg_type_wrapper(annotation)

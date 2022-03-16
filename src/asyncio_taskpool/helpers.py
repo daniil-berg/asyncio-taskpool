@@ -21,6 +21,7 @@ Miscellaneous helper functions. None of these should be considered part of the p
 
 from asyncio.coroutines import iscoroutinefunction
 from asyncio.queues import Queue
+from importlib import import_module
 from inspect import getdoc
 from typing import Any, Optional, Union
 
@@ -63,3 +64,22 @@ async def return_or_exception(_function_to_execute: AnyCallableT, *args, **kwarg
             return _function_to_execute(*args, **kwargs)
     except Exception as e:
         return e
+
+
+def resolve_dotted_path(dotted_path: str) -> object:
+    """
+    Resolves a dotted path to a global object and returns that object.
+
+    Algorithm shamelessly stolen from the `logging.config` module from the standard library.
+    """
+    names = dotted_path.split('.')
+    module_name = names.pop(0)
+    found = import_module(module_name)
+    for name in names:
+        try:
+            found = getattr(found, name)
+        except AttributeError:
+            module_name += f'.{name}'
+            import_module(module_name)
+            found = getattr(found, name)
+    return found

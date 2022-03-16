@@ -37,7 +37,7 @@ from .session import ControlSession
 log = logging.getLogger(__name__)
 
 
-class ControlServer(ABC):  # TODO: Implement interface for normal TaskPool instances, not just SimpleTaskPool
+class ControlServer(ABC):
     """
     Abstract base class for a task pool control server.
 

@@ -20,7 +20,7 @@ Unittests for the `asyncio_taskpool.helpers` module.
 
 
 from unittest import IsolatedAsyncioTestCase
-from unittest.mock import MagicMock, AsyncMock, NonCallableMagicMock
+from unittest.mock import MagicMock, AsyncMock, NonCallableMagicMock, call, patch
 
 from asyncio_taskpool import helpers
 
@@ -118,3 +118,13 @@ class HelpersTestCase(IsolatedAsyncioTestCase):
         output = await helpers.return_or_exception(mock_func, *args, **kwargs)
         self.assertEqual(test_exception, output)
         mock_func.assert_called_once_with(*args, **kwargs)
+
+    def test_resolve_dotted_path(self):
+        from logging import WARNING
+        from urllib.request import urlopen
+        self.assertEqual(WARNING, helpers.resolve_dotted_path('logging.WARNING'))
+        self.assertEqual(urlopen, helpers.resolve_dotted_path('urllib.request.urlopen'))
+        with patch.object(helpers, 'import_module', return_value=object) as mock_import_module:
+            with self.assertRaises(AttributeError):
+                helpers.resolve_dotted_path('foo.bar.baz')
+            mock_import_module.assert_has_calls([call('foo'), call('foo.bar')])

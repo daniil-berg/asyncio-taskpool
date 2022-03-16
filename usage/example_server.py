@@ -15,7 +15,7 @@ You should have received a copy of the GNU Lesser General Public License along w
 If not, see <https://www.gnu.org/licenses/>."""
 
 __doc__ = """
-Working example of a UnixControlServer in combination with the SimpleTaskPool.
+Working example of a TCPControlServer in combination with the SimpleTaskPool.
 Use the main CLI client to interface at the socket.
 """
 
