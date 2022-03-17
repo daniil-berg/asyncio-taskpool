@@ -84,7 +84,6 @@ class BaseTaskPoolTestCase(CommonTestCase):
 
     def test_init(self):
         self.assertEqual(0, self.task_pool._num_started)
-        self.assertEqual(0, self.task_pool._num_cancellations)
 
         self.assertFalse(self.task_pool._locked)
         self.assertFalse(self.task_pool._closed)
@@ -114,14 +113,14 @@ class BaseTaskPoolTestCase(CommonTestCase):
 
     def test_pool_size(self):
         self.pool_size_patcher.stop()
-        self.task_pool._pool_size = self.TEST_POOL_SIZE
+        self.task_pool._enough_room._value = self.TEST_POOL_SIZE
         self.assertEqual(self.TEST_POOL_SIZE, self.task_pool.pool_size)
 
         with self.assertRaises(ValueError):
             self.task_pool.pool_size = -1
 
         self.task_pool.pool_size = new_size = 69
-        self.assertEqual(new_size, self.task_pool._pool_size)
+        self.assertEqual(new_size, self.task_pool._enough_room._value)
 
     def test_is_locked(self):
         self.task_pool._locked = FOO
@@ -145,20 +144,13 @@ class BaseTaskPoolTestCase(CommonTestCase):
         self.task_pool._tasks_running = {1: FOO, 2: BAR, 3: BAZ}
         self.assertEqual(3, self.task_pool.num_running)
 
-    def test_num_cancellations(self):
-        self.task_pool._num_cancellations = 3
-        self.assertEqual(3, self.task_pool.num_cancellations)
+    def test_num_cancelled(self):
+        self.task_pool._tasks_cancelled = {1: FOO, 2: BAR, 3: BAZ}
+        self.assertEqual(3, self.task_pool.num_cancelled)
 
     def test_num_ended(self):
         self.task_pool._tasks_ended = {1: FOO, 2: BAR, 3: BAZ}
         self.assertEqual(3, self.task_pool.num_ended)
-
-    def test_num_finished(self):
-        self.task_pool._num_cancellations = num_cancellations = 69
-        num_ended = 420
-        self.task_pool._tasks_ended = {i: FOO for i in range(num_ended)}
-        self.task_pool._tasks_cancelled = mock_cancelled_dict = {1: FOO, 2: BAR, 3: BAZ}
-        self.assertEqual(num_ended - num_cancellations + len(mock_cancelled_dict), self.task_pool.num_finished)
 
     def test_is_full(self):
         self.assertEqual(self.task_pool._enough_room.locked(), self.task_pool.is_full)
@@ -200,12 +192,10 @@ class BaseTaskPoolTestCase(CommonTestCase):
     @patch.object(pool.BaseTaskPool, '_task_name', return_value=FOO)
     async def test__task_cancellation(self, mock__task_name: MagicMock, mock_execute_optional: AsyncMock):
         task_id, mock_task, mock_callback = 1, MagicMock(), MagicMock()
-        self.task_pool._num_cancellations = cancelled = 3
         self.task_pool._tasks_running[task_id] = mock_task
         self.assertIsNone(await self.task_pool._task_cancellation(task_id, mock_callback))
         self.assertNotIn(task_id, self.task_pool._tasks_running)
         self.assertEqual(mock_task, self.task_pool._tasks_cancelled[task_id])
-        self.assertEqual(cancelled + 1, self.task_pool._num_cancellations)
         mock__task_name.assert_called_with(task_id)
         mock_execute_optional.assert_awaited_once_with(mock_callback, args=(task_id, ))
 
