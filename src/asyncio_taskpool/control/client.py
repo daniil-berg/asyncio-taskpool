@@ -27,13 +27,24 @@ from asyncio.streams import StreamReader, StreamWriter, open_connection
 from pathlib import Path
 from typing import Optional, Union
 
-from ..constants import CLIENT_EXIT, CLIENT_INFO, SESSION_MSG_BYTES
-from ..types import ClientConnT, PathT
+from ..internals.constants import CLIENT_INFO, SESSION_MSG_BYTES
+from ..internals.types import ClientConnT, PathT
+
+
+__all__ = [
+    'ControlClient',
+    'TCPControlClient',
+    'UnixControlClient',
+    'CLIENT_EXIT'
+]
+
+
+CLIENT_EXIT = 'exit'
 
 
 class ControlClient(ABC):
     """
-    Abstract base class for a simple implementation of a task pool control client.
+    Abstract base class for a simple implementation of a pool control client.
 
     Since the server's control interface is simply expecting commands to be sent, any process able to connect to the
     TCP or UNIX socket and issue the relevant commands (and optionally read the responses) will work just as well.
@@ -58,7 +69,7 @@ class ControlClient(ABC):
         raise NotImplementedError
 
     def __init__(self, **conn_kwargs) -> None:
-        """Simply stores the connection keyword-arguments necessary for opening the connection."""
+        """Simply stores the keyword-arguments for opening the connection."""
         self._conn_kwargs = conn_kwargs
         self._connected: bool = False
 
@@ -91,7 +102,7 @@ class ControlClient(ABC):
         """
         try:
             msg = input("> ").strip().lower()
-        except EOFError:  # Ctrl+D shall be equivalent to the `CLIENT_EXIT` command.
+        except EOFError:  # Ctrl+D shall be equivalent to the :const:`CLIENT_EXIT` command.
             msg = CLIENT_EXIT
         except KeyboardInterrupt:  # Ctrl+C shall simply reset to the input prompt.
             print()
@@ -129,11 +140,14 @@ class ControlClient(ABC):
 
     async def start(self) -> None:
         """
-        This method opens the pre-defined connection, performs the server-handshake, and enters the interaction loop.
+        Opens connection, performs handshake, and enters interaction loop.
+
+        An input prompt is presented to the user and any input is sent (encoded) to the connected server.
+        One exception is the :const:`CLIENT_EXIT` command (equivalent to Ctrl+D), which merely closes the connection.
 
         If the connection can not be established, an error message is printed to `stderr` and the method returns.
-        If the `_connected` flag is set to `False` during the interaction loop, the method returns and prints out a
-        disconnected-message.
+        If either the exit command is issued or the connection to the server is lost during the interaction loop,
+        the method returns and prints out a disconnected-message.
         """
         reader, writer = await self._open_connection(**self._conn_kwargs)
         if reader is None:
@@ -146,10 +160,10 @@ class ControlClient(ABC):
 
 
 class TCPControlClient(ControlClient):
-    """Task pool control client that expects a TCP socket to be exposed by the control server."""
+    """Task pool control client for connecting to a :class:`TCPControlServer`."""
 
     def __init__(self, host: str, port: Union[int, str], **conn_kwargs) -> None:
-        """In addition to what the base class does, `host` and `port` are expected as non-optional arguments."""
+        """`host` and `port` are expected as non-optional connection arguments."""
         self._host = host
         self._port = port
         super().__init__(**conn_kwargs)
@@ -169,10 +183,10 @@ class TCPControlClient(ControlClient):
 
 
 class UnixControlClient(ControlClient):
-    """Task pool control client that expects a unix socket to be exposed by the control server."""
+    """Task pool control client for connecting to a :class:`UnixControlServer`."""
 
     def __init__(self, socket_path: PathT, **conn_kwargs) -> None:
-        """In addition to what the base class does, the `socket_path` is expected as a non-optional argument."""
+        """`socket_path` is expected as a non-optional connection argument."""
         from asyncio.streams import open_unix_connection
         self._open_unix_connection = open_unix_connection
         self._socket_path = Path(socket_path)

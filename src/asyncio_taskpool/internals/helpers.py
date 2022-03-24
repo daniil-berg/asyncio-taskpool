@@ -29,6 +29,22 @@ from .types import T, AnyCallableT, ArgsT, KwArgsT
 
 
 async def execute_optional(function: AnyCallableT, args: ArgsT = (), kwargs: KwArgsT = None) -> Optional[T]:
+    """
+    Runs `function` with `args` and `kwargs` and returns its output.
+
+    Args:
+        function:
+            Any callable that accepts the provided positional and keyword-arguments.
+            If it is a coroutine function, it will be awaited.
+            If it is not a callable, nothing is returned.
+        *args (optional):
+            Positional arguments to pass to `function`.
+        **kwargs (optional):
+            Keyword-arguments to pass to `function`.
+
+    Returns:
+        Whatever `function` returns (possibly after being awaited) or `None` if `function` is not callable.
+    """
     if not callable(function):
         return
     if kwargs is None:
@@ -39,6 +55,28 @@ async def execute_optional(function: AnyCallableT, args: ArgsT = (), kwargs: KwA
 
 
 def star_function(function: AnyCallableT, arg: Any, arg_stars: int = 0) -> T:
+    """
+    Calls `function` passing `arg` to it, optionally unpacking it first.
+
+    Args:
+        function:
+            Any callable that accepts the provided argument(s).
+        arg:
+            The single positional argument that `function` expects; in this case `arg_stars` should be 0.
+            Or the iterable of positional arguments that `function` expects; in this case `arg_stars` should be 1.
+            Or the mapping of keyword-arguments that `function` expects; in this case `arg_stars` should be 2.
+        arg_stars (optional):
+            Determines if and how to unpack `arg`.
+            0 means no unpacking, i.e. `arg` is passed into `function` directly as `function(arg)`.
+            1 means unpacking to an arbitrary number of positional arguments, i.e. as `function(*arg)`.
+            2 means unpacking to an arbitrary number of keyword-arguments, i.e. as `function(**arg)`.
+
+    Returns:
+        Whatever `function` returns.
+
+    Raises:
+        `ValueError`: `arg_stars` is something other than 0, 1, or 2.
+    """
     if arg_stars == 0:
         return function(arg)
     if arg_stars == 1:
@@ -49,14 +87,30 @@ def star_function(function: AnyCallableT, arg: Any, arg_stars: int = 0) -> T:
 
 
 async def join_queue(q: Queue) -> None:
+    """Wrapper function around the join method of an `asyncio.Queue` instance."""
     await q.join()
 
 
 def get_first_doc_line(obj: object) -> str:
+    """Takes an object and returns the first (non-empty) line of its docstring."""
     return getdoc(obj).strip().split("\n", 1)[0].strip()
 
 
 async def return_or_exception(_function_to_execute: AnyCallableT, *args, **kwargs) -> Union[T, Exception]:
+    """
+    Returns the output of a function or the exception thrown during its execution.
+
+    Args:
+        _function_to_execute:
+            Any callable that accepts the provided positional and keyword-arguments.
+        *args (optional):
+            Positional arguments to pass to `_function_to_execute`.
+        **kwargs (optional):
+            Keyword-arguments to pass to `_function_to_execute`.
+
+    Returns:
+        Whatever `_function_to_execute` returns or throws. (An exception is not raised, but returned!)
+    """
     try:
         if iscoroutinefunction(_function_to_execute):
             return await _function_to_execute(*args, **kwargs)

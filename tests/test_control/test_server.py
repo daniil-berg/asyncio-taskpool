@@ -183,7 +183,7 @@ class UnixControlServerTestCase(IsolatedAsyncioTestCase):
         self.mock_pool = MagicMock()
         self.path = '/tmp/asyncio_taskpool'
         self.kwargs = {FOO: 123, BAR: 456}
-        self.server = server.UnixControlServer(pool=self.mock_pool, path=self.path, **self.kwargs)
+        self.server = server.UnixControlServer(pool=self.mock_pool, socket_path=self.path, **self.kwargs)
 
     def tearDown(self) -> None:
         self.base_init_patcher.stop()

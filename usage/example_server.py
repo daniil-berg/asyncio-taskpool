@@ -23,8 +23,9 @@ Use the main CLI client to interface at the socket.
 import asyncio
 import logging
 
-from asyncio_taskpool import SimpleTaskPool, TCPControlServer
-from asyncio_taskpool.constants import PACKAGE_NAME
+from asyncio_taskpool import SimpleTaskPool
+from asyncio_taskpool.control import TCPControlServer
+from asyncio_taskpool.internals.constants import PACKAGE_NAME
 
 
 logging.getLogger().setLevel(logging.NOTSET)

@@ -15,7 +15,7 @@ You should have received a copy of the GNU Lesser General Public License along w
 If not, see <https://www.gnu.org/licenses/>."""
 
 __doc__ = """
-This module contains the task pool control server class definitions.
+Task pool control server class definitions.
 """
 
 
@@ -28,10 +28,13 @@ from asyncio.tasks import Task, create_task
 from pathlib import Path
 from typing import Optional, Union
 
-from ..pool import TaskPool, SimpleTaskPool
-from ..types import ConnectedCallbackT
 from .client import ControlClient, TCPControlClient, UnixControlClient
 from .session import ControlSession
+from ..pool import AnyTaskPoolT
+from ..internals.types import ConnectedCallbackT, PathT
+
+
+__all__ = ['ControlServer', 'TCPControlServer', 'UnixControlServer']
 
 
 log = logging.getLogger(__name__)
@@ -41,16 +44,51 @@ class ControlServer(ABC):
     """
     Abstract base class for a task pool control server.
 
-    This class acts as a wrapper around an async server instance and initializes a `ControlSession` upon a client
-    connecting to it. The entire interface is defined within that session class.
+    This class acts as a wrapper around an async server instance and initializes a
+    :class:`ControlSession <asyncio_taskpool.control.session.ControlSession>` once a client connects to it.
+    The interface is defined within the session class.
     """
     _client_class = ControlClient
 
     @classmethod
     @property
     def client_class_name(cls) -> str:
-        """Returns the name of the control client class matching the server class."""
+        """Returns the name of the matching control client class."""
         return cls._client_class.__name__
+
+    def __init__(self, pool: AnyTaskPoolT, **server_kwargs) -> None:
+        """
+        Merely sets internal attributes, but does not start the server yet.
+        The task pool must be passed here and can not be set/changed afterwards. This means a control server is always
+        tied to one specific task pool.
+
+        Args:
+            pool:
+                An instance of a `BaseTaskPool` subclass to tie the server to.
+            **server_kwargs (optional):
+                Keyword arguments that will be passed into the function that starts the server.
+        """
+        self._pool: AnyTaskPoolT = pool
+        self._server_kwargs = server_kwargs
+        self._server: Optional[AbstractServer] = None
+
+    @property
+    def pool(self) -> AnyTaskPoolT:
+        """The task pool instance controlled by the server."""
+        return self._pool
+
+    def is_serving(self) -> bool:
+        """Wrapper around the `asyncio.Server.is_serving` method."""
+        return self._server.is_serving()
+
+    async def _client_connected_cb(self, reader: StreamReader, writer: StreamWriter) -> None:
+        """
+        The universal client callback that will be passed into the `_get_server_instance` method.
+        Instantiates a control session, performs the client handshake, and enters the session's `listen` loop.
+        """
+        session = ControlSession(self, reader, writer)
+        await session.client_handshake()
+        await session.listen()
 
     @abstractmethod
     async def _get_server_instance(self, client_connected_cb: ConnectedCallbackT, **kwargs) -> AbstractServer:
@@ -74,40 +112,6 @@ class ControlServer(ABC):
         """The method to run after the server's `serve_forever` methods ends for whatever reason."""
         raise NotImplementedError
 
-    def __init__(self, pool: Union[TaskPool, SimpleTaskPool], **server_kwargs) -> None:
-        """
-        Initializes by merely saving the internal attributes, but without starting the server yet.
-        The task pool must be passed here and can not be set/changed afterwards. This means a control server is always
-        tied to one specific task pool.
-
-        Args:
-            pool:
-                An instance of a `BaseTaskPool` subclass to tie the server to.
-            **server_kwargs (optional):
-                Keyword arguments that will be passed into the function that starts the server.
-        """
-        self._pool: Union[TaskPool, SimpleTaskPool] = pool
-        self._server_kwargs = server_kwargs
-        self._server: Optional[AbstractServer] = None
-
-    @property
-    def pool(self) -> Union[TaskPool, SimpleTaskPool]:
-        """Read-only property for accessing the task pool instance controlled by the server."""
-        return self._pool
-
-    def is_serving(self) -> bool:
-        """Wrapper around the `asyncio.Server.is_serving` method."""
-        return self._server.is_serving()
-
-    async def _client_connected_cb(self, reader: StreamReader, writer: StreamWriter) -> None:
-        """
-        The universal client callback that will be passed into the `_get_server_instance` method.
-        Instantiates a control session, performs the client handshake, and enters the session's `listen` loop.
-        """
-        session = ControlSession(self, reader, writer)
-        await session.client_handshake()
-        await session.listen()
-
     async def _serve_forever(self) -> None:
         """
         To be run as an `asyncio.Task` by the following method.
@@ -124,9 +128,12 @@ class ControlServer(ABC):
 
     async def serve_forever(self) -> Task:
         """
-        This method actually starts the server and begins listening to client connections on the specified interface.
+        Starts the server and begins listening to client connections.
 
         It should never block because the serving will be performed in a separate task.
+
+        Returns:
+            The forever serving task. To stop the server, this task should be cancelled.
         """
         log.debug("Starting %s...", self.__class__.__name__)
         self._server = await self._get_server_instance(self._client_connected_cb, **self._server_kwargs)
@@ -134,12 +141,13 @@ class ControlServer(ABC):
 
 
 class TCPControlServer(ControlServer):
-    """Task pool control server class that exposes a TCP socket for control clients to connect to."""
+    """Exposes a TCP socket for control clients to connect to."""
     _client_class = TCPControlClient
 
-    def __init__(self, pool: Union[TaskPool, SimpleTaskPool], **server_kwargs) -> None:
-        self._host = server_kwargs.pop('host')
-        self._port = server_kwargs.pop('port')
+    def __init__(self, pool: AnyTaskPoolT, host: str, port: Union[int, str], **server_kwargs) -> None:
+        """`host` and `port` are expected as non-optional server arguments."""
+        self._host = host
+        self._port = port
         super().__init__(pool, **server_kwargs)
 
     async def _get_server_instance(self, client_connected_cb: ConnectedCallbackT, **kwargs) -> AbstractServer:
@@ -152,13 +160,14 @@ class TCPControlServer(ControlServer):
 
 
 class UnixControlServer(ControlServer):
-    """Task pool control server class that exposes a unix socket for control clients to connect to."""
+    """Exposes a unix socket for control clients to connect to."""
     _client_class = UnixControlClient
 
-    def __init__(self, pool: Union[TaskPool, SimpleTaskPool], **server_kwargs) -> None:
+    def __init__(self, pool: AnyTaskPoolT, socket_path: PathT, **server_kwargs) -> None:
+        """`socket_path` is expected as a non-optional server argument."""
         from asyncio.streams import start_unix_server
         self._start_unix_server = start_unix_server
-        self._socket_path = Path(server_kwargs.pop('path'))
+        self._socket_path = Path(socket_path)
         super().__init__(pool, **server_kwargs)
 
     async def _get_server_instance(self, client_connected_cb: ConnectedCallbackT, **kwargs) -> AbstractServer:

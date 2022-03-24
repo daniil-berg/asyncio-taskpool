@@ -15,7 +15,7 @@ You should have received a copy of the GNU Lesser General Public License along w
 If not, see <https://www.gnu.org/licenses/>."""
 
 __doc__ = """
-This module contains the the definition of the `ControlSession` class used by the control server.
+Definition of the :class:`ControlSession` used by a :class:`ControlServer`.
 """
 
 
@@ -26,14 +26,17 @@ from asyncio.streams import StreamReader, StreamWriter
 from inspect import isfunction, signature
 from typing import Callable, Optional, Union, TYPE_CHECKING
 
-from ..constants import CLIENT_INFO, CMD, CMD_OK, SESSION_MSG_BYTES, STREAM_WRITER
-from ..exceptions import CommandError, HelpRequested, ParserError
-from ..helpers import return_or_exception
-from ..pool import TaskPool, SimpleTaskPool
 from .parser import ControlParser
+from ..exceptions import CommandError, HelpRequested, ParserError
+from ..pool import TaskPool, SimpleTaskPool
+from ..internals.constants import CLIENT_INFO, CMD, CMD_OK, SESSION_MSG_BYTES, STREAM_WRITER
+from ..internals.helpers import return_or_exception
 
 if TYPE_CHECKING:
     from .server import ControlServer
+
+
+__all__ = ['ControlSession']
 
 
 log = logging.getLogger(__name__)
@@ -41,15 +44,15 @@ log = logging.getLogger(__name__)
 
 class ControlSession:
     """
-    This class defines the API for controlling a task pool instance from the outside.
+    Manages a single control session between a server and a client.
 
     The commands received from a connected client are translated into method calls on the task pool instance.
-    A subclass of the standard `argparse.ArgumentParser` is used to handle the input read from the stream.
+    A subclass of the standard :class:`argparse.ArgumentParser` is used to handle the input read from the stream.
     """
 
     def __init__(self, server: 'ControlServer', reader: StreamReader, writer: StreamWriter) -> None:
         """
-        Instantiation should happen once a client connection to the control server has already been established.
+        Connection to the control server should already been established.
 
         For more convenient/efficient access, some of the server's properties are saved in separate attributes.
         The argument parser is _not_ instantiated in the constructor. It requires a bit of client information during
@@ -57,7 +60,7 @@ class ControlSession:
 
         Args:
             server:
-                The instance of a `ControlServer` subclass starting the session.
+                The instance of a :class:`ControlServer` subclass starting the session.
             reader:
                 The `asyncio.StreamReader` created when a client connected to the server.
             writer:
@@ -75,8 +78,9 @@ class ControlSession:
         Takes a pool method reference, executes it, and writes a response accordingly.
 
         If the first parameter is named `self`, the method will be called with the `_pool` instance as its first
-        positional argument. If it returns nothing, the response upon successful execution will be `constants.CMD_OK`,
-        otherwise the response written to the stream will be its return value (as an encoded string).
+        positional argument.
+        If it returns nothing, the response upon successful execution will be :const:`constants.CMD_OK`, otherwise the
+        response written to the stream will be its return value (as an encoded string).
 
         Args:
             prop:
@@ -108,7 +112,7 @@ class ControlSession:
                 The reference to the property defined on the `_pool` instance's class.
             **kwargs (optional):
                 If not empty, the property setter is executed and the keyword arguments are passed along to it; the
-                response upon successful execution will be `constants.CMD_OK`. Otherwise the property getter is
+                response upon successful execution will be :const:`constants.CMD_OK`. Otherwise the property getter is
                 executed and the response written to the stream will be its return value (as an encoded string).
         """
         if kwargs:
@@ -121,9 +125,10 @@ class ControlSession:
 
     async def client_handshake(self) -> None:
         """
-        This method must be invoked before starting any other client interaction.
+        Must be invoked before starting any other client interaction.
 
-        Client info is retrieved, server info is sent back, and the `ControlParser` is initialized and configured.
+        Client info is retrieved, server info is sent back, and the
+        :class:`ControlParser <asyncio_taskpool.control.parser.ControlParser>` is set up.
         """
         client_info = json.loads((await self._reader.read(SESSION_MSG_BYTES)).decode().strip())
         log.debug("%s connected", self._client_class_name)
@@ -144,9 +149,9 @@ class ControlSession:
         """
         Takes a message from the client and attempts to parse it.
 
-        If a parsing error occurs, it is returned to the client. If the `HelpRequested` exception was raised by the
-        `ControlParser`, nothing else happens. Otherwise, the appropriate `_exec...` method is called with the entire
-        dictionary of keyword-arguments returned by the `ControlParser` passed into it.
+        If a parsing error occurs, it is returned to the client. If the :exc:`HelpRequested` exception was raised by the
+        :class:`ControlParser`, nothing else happens. Otherwise, the appropriate `_exec...` method is called with the
+        entire dictionary of keyword-arguments returned by the :class:`ControlParser` passed into it.
 
         Args:
             msg: The non-empty string read from the client stream.
@@ -170,9 +175,10 @@ class ControlSession:
 
     async def listen(self) -> None:
         """
-        Enters the main control loop that only ends if either the server or the client disconnect.
+        Enters the main control loop listening to client input.
 
-        Messages from the client are read and passed into the `_parse_command` method, which handles the rest.
+        This method only returns if either the server or the client disconnect.
+        Messages from the client are read, parsed, and turned into pool commands (if possible).
         This method should be called, when the client connection was established and the handshake was successful.
         It will obviously block indefinitely.
         """

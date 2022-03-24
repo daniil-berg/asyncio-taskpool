@@ -14,10 +14,5 @@ See the GNU Lesser General Public License for more details.
 You should have received a copy of the GNU Lesser General Public License along with asyncio-taskpool. 
 If not, see <https://www.gnu.org/licenses/>."""
 
-__doc__ = """
-Brings the main classes up to package level for import convenience.
-"""
 
-
-from .control.server import TCPControlServer, UnixControlServer
 from .pool import TaskPool, SimpleTaskPool

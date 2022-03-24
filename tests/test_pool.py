@@ -27,7 +27,7 @@ from unittest.mock import PropertyMock, MagicMock, AsyncMock, patch, call
 from typing import Type
 
 from asyncio_taskpool import pool, exceptions
-from asyncio_taskpool.constants import DATETIME_FORMAT
+from asyncio_taskpool.internals.constants import DATETIME_FORMAT
 
 
 EMPTY_LIST, EMPTY_DICT, EMPTY_SET = [], {}, set()

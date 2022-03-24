@@ -22,7 +22,7 @@ Unittests for the `asyncio_taskpool.helpers` module.
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import MagicMock, AsyncMock, NonCallableMagicMock, call, patch
 
-from asyncio_taskpool import helpers
+from asyncio_taskpool.internals import helpers
 
 
 class HelpersTestCase(IsolatedAsyncioTestCase):

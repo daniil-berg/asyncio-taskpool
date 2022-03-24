@@ -15,7 +15,8 @@ You should have received a copy of the GNU Lesser General Public License along w
 If not, see <https://www.gnu.org/licenses/>."""
 
 __doc__ = """
-This module contains the the definition of the `ControlParser` class used by a control server.
+Definition of the :class:`ControlParser` used in a 
+:class:`ControlSession <asyncio_taskpool.control.session.ControlSession>`.
 """
 
 
@@ -26,10 +27,13 @@ from inspect import Parameter, getmembers, isfunction, signature
 from shutil import get_terminal_size
 from typing import Any, Callable, Container, Dict, Iterable, Set, Type, TypeVar
 
-from ..constants import CLIENT_INFO, CMD, STREAM_WRITER
 from ..exceptions import HelpRequested, ParserError
-from ..helpers import get_first_doc_line, resolve_dotted_path
-from ..types import ArgsT, CancelCB, CoroutineFunc, EndCB, KwArgsT
+from ..internals.constants import CLIENT_INFO, CMD, STREAM_WRITER
+from ..internals.helpers import get_first_doc_line, resolve_dotted_path
+from ..internals.types import ArgsT, CancelCB, CoroutineFunc, EndCB, KwArgsT
+
+
+__all__ = ['ControlParser']
 
 
 FmtCls = TypeVar('FmtCls', bound=Type[HelpFormatter])
@@ -42,7 +46,7 @@ NAME, PROG, HELP, DESCRIPTION = 'name', 'prog', 'help', 'description'
 
 class ControlParser(ArgumentParser):
     """
-    Subclass of the standard `argparse.ArgumentParser` for remote interaction.
+    Subclass of the standard :code:`argparse.ArgumentParser` for pool control.
 
     Such a parser is not supposed to ever print to stdout/stderr, but instead direct all messages to a `StreamWriter`
     instance passed to it during initialization.
@@ -54,16 +58,18 @@ class ControlParser(ArgumentParser):
     @staticmethod
     def help_formatter_factory(terminal_width: int, base_cls: FmtCls = None) -> FmtCls:
         """
-        Constructs and returns a subclass of `argparse.HelpFormatter` with a fixed terminal width argument.
+        Constructs and returns a subclass of :class:`argparse.HelpFormatter`
 
-        Although a custom formatter class can be explicitly passed into the `ArgumentParser` constructor, this is not
-        as convenient, when making use of sub-parsers.
+        The formatter class will have the defined `terminal_width`.
+
+        Although a custom formatter class can be explicitly passed into the :class:`ArgumentParser` constructor,
+        this is not as convenient, when making use of sub-parsers.
 
         Args:
             terminal_width:
                 The number of columns of the terminal to which to adjust help formatting.
             base_cls (optional):
-                The base class to use for inheritance. By default `argparse.ArgumentDefaultsHelpFormatter` is used.
+                Base class to use for inheritance. By default :class:`argparse.ArgumentDefaultsHelpFormatter` is used.
 
         Returns:
             The subclass of `base_cls` which fixes the constructor's `width` keyword-argument to `terminal_width`.
@@ -77,21 +83,19 @@ class ControlParser(ArgumentParser):
                 super().__init__(*args, **kwargs)
         return ClientHelpFormatter
 
-    def __init__(self, stream_writer: StreamWriter, terminal_width: int = None,
-                 **kwargs) -> None:
+    def __init__(self, stream_writer: StreamWriter, terminal_width: int = None, **kwargs) -> None:
         """
-        Subclass of the `ArgumentParser` geared towards asynchronous interaction with an object "from the outside".
-
-        Allows directing output to a specified writer rather than stdout/stderr and setting terminal width explicitly.
+        Sets some internal attributes in addition to the base class.
 
         Args:
             stream_writer:
-                The instance of the `asyncio.StreamWriter` to use for message output.
+                The instance of the :class:`asyncio.StreamWriter` to use for message output.
             terminal_width (optional):
-                The terminal width to use for all message formatting. Defaults to `shutil.get_terminal_size().columns`.
+                The terminal width to use for all message formatting. By default the :code:`columns` attribute from
+                :func:`shutil.get_terminal_size` is taken.
             **kwargs(optional):
                 Passed to the parent class constructor. The exception is the `formatter_class` parameter: Even if a
-                class is specified, it will always be subclassed in the `help_formatter_factory`.
+                class is specified, it will always be subclassed in the :meth:`help_formatter_factory`.
                 Also, by default, `exit_on_error` is set to `False` (as opposed to how the parent class handles it).
         """
         self._stream_writer: StreamWriter = stream_writer
@@ -105,12 +109,12 @@ class ControlParser(ArgumentParser):
     def add_function_command(self, function: Callable, omit_params: Container[str] = OMIT_PARAMS_DEFAULT,
                              **subparser_kwargs) -> 'ControlParser':
         """
-        Takes a function along with its parameters and adds a corresponding (sub-)command to the parser.
+        Takes a function and adds a corresponding (sub-)command to the parser.
 
-        The `add_subparsers` method must have been called prior to this.
+        The :meth:`add_subparsers` method must have been called prior to this.
 
-        NOTE: Currently, only a limited spectrum of parameters can be accurately converted to a parser argument.
-        This method works correctly with any public method of the `SimpleTaskPool` class.
+        NOTE: Currently, only a limited spectrum of parameters can be accurately converted to parser arguments.
+        This method works correctly with any public method of the any task pool class.
 
         Args:
             function:
@@ -118,7 +122,7 @@ class ControlParser(ArgumentParser):
             omit_params (optional):
                 Names of function parameters not to add as parser arguments.
             **subparser_kwargs (optional):
-                Passed directly to the `add_parser` method.
+                Passed directly to the :meth:`add_parser` method.
 
         Returns:
             The subparser instance created from the function.
@@ -133,7 +137,7 @@ class ControlParser(ArgumentParser):
 
     def add_property_command(self, prop: property, cls_name: str = '', **subparser_kwargs) -> 'ControlParser':
         """
-        Same as the `add_function_command` method, but for properties.
+        Same as the :meth:`add_function_command` method, but for properties.
 
         Args:
             prop:
@@ -141,7 +145,7 @@ class ControlParser(ArgumentParser):
             cls_name (optional):
                 Name of the class the property is defined on to appear in the command help text.
             **subparser_kwargs (optional):
-                Passed directly to the `add_parser` method.
+                Passed directly to the :meth:`add_parser` method.
 
         Returns:
             The subparser instance created from the property.
@@ -164,12 +168,12 @@ class ControlParser(ArgumentParser):
     def add_class_commands(self, cls: Type, public_only: bool = True, omit_members: Container[str] = (),
                            member_arg_name: str = CMD) -> ParsersDict:
         """
-        Takes a class and adds its methods and properties as (sub-)commands to the parser.
+        Adds methods/properties of a class as (sub-)commands to the parser.
 
-        The `add_subparsers` method must have been called prior to this.
+        The :meth:`add_subparsers` method must have been called prior to this.
 
         NOTE: Currently, only a limited spectrum of function parameters can be accurately converted to parser arguments.
-        This method works correctly with the `SimpleTaskPool` class.
+        This method works correctly with any task pool class.
 
         Args:
             cls:
@@ -181,7 +185,6 @@ class ControlParser(ArgumentParser):
             member_arg_name (optional):
                 After parsing the arguments, depending on which command was invoked by the user, the corresponding
                 method/property will be stored as an extra argument in the parsed namespace under this attribute name.
-                Defaults to `constants.CMD`.
 
         Returns:
             Dictionary mapping class member names to the (sub-)parsers created from them.
@@ -202,7 +205,7 @@ class ControlParser(ArgumentParser):
         return parsers
 
     def add_subparsers(self, *args, **kwargs):
-        """Adds the subparsers action as an internal attribute before returning it."""
+        """Adds the subparsers action as an attribute before returning it."""
         self._commands = super().add_subparsers(*args, **kwargs)
         return self._commands
 
@@ -217,28 +220,28 @@ class ControlParser(ArgumentParser):
             self._print_message(message)
 
     def error(self, message: str) -> None:
-        """This just adds the custom `HelpRequested` exception after the parent class' method."""
+        """Raises the :exc:`ParserError <asyncio_taskpool.exceptions.ParserError>` exception at the end."""
         super().error(message=message)
         raise ParserError
 
     def print_help(self, file=None) -> None:
-        """This just adds the custom `HelpRequested` exception after the parent class' method."""
+        """Raises the :exc:`HelpRequested <asyncio_taskpool.exceptions.HelpRequested>` exception at the end."""
         super().print_help(file)
         raise HelpRequested
 
     def add_function_arg(self, parameter: Parameter, **kwargs) -> Action:
         """
-        Takes an `inspect.Parameter` of a function and adds a corresponding argument to the parser.
+        Takes an :class:`inspect.Parameter` and adds a corresponding parser argument.
 
         NOTE: Currently, only a limited spectrum of parameters can be accurately converted to a parser argument.
-        This method works correctly with any parameter of any public method of the `SimpleTaskPool` class.
+        This method works correctly with any parameter of any public method any task pool class.
 
         Args:
-            parameter: The `inspect.Parameter` object to be converted to a parser argument.
-            **kwargs: Passed to the `add_argument` method of the base class.
+            parameter: The :class:`inspect.Parameter` object to be converted to a parser argument.
+            **kwargs: Passed to the :meth:`add_argument` method of the base class.
 
         Returns:
-            The `argparse.Action` returned by the `add_argument` method.
+            The :class:`argparse.Action` returned by the :meth:`add_argument` method.
         """
         if parameter.default is Parameter.empty:
             # A non-optional function parameter should correspond to a positional argument.
@@ -273,10 +276,10 @@ class ControlParser(ArgumentParser):
 
     def add_function_args(self, function: Callable, omit: Container[str] = OMIT_PARAMS_DEFAULT) -> None:
         """
-        Takes a function reference and adds its parameters as arguments to the parser.
+        Takes a function and adds its parameters as arguments to the parser.
 
         NOTE: Currently, only a limited spectrum of parameters can be accurately converted to a parser argument.
-        This method works correctly with any public method of the `SimpleTaskPool` class.
+        This method works correctly with any public method of any task pool class.
 
         Args:
             function:
@@ -305,6 +308,16 @@ def _get_arg_type_wrapper(cls: Type) -> Callable[[Any], Any]:
 
 
 def _get_type_from_annotation(annotation: Type) -> Callable[[Any], Any]:
+    """
+    Returns a type conversion function based on the `annotation` passed.
+
+    Required to properly convert parsed arguments to the type expected by certain pool methods.
+    Each conversion function is wrapped by `_get_arg_type_wrapper`.
+
+    `Callable`-type annotations give the `resolve_dotted_path` function.
+    `Iterable`- or args/kwargs-type annotations give the `ast.literal_eval` function.
+    Others pass unchanged (but still wrapped with `_get_arg_type_wrapper`).
+    """
     if any(annotation is t for t in {CoroutineFunc, EndCB, CancelCB}):
         annotation = resolve_dotted_path
     if any(annotation is t for t in {ArgsT, KwArgsT, Iterable[ArgsT], Iterable[KwArgsT]}):

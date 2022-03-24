@@ -15,7 +15,7 @@ You should have received a copy of the GNU Lesser General Public License along w
 If not, see <https://www.gnu.org/licenses/>."""
 
 __doc__ = """
-This module contains the definition of an `asyncio.Queue` subclass.
+Definition of an :code:`asyncio.Queue` subclass with some small additions.
 """
 
 
@@ -23,12 +23,20 @@ from asyncio.queues import Queue as _Queue
 from typing import Any
 
 
+__all__ = ['Queue']
+
+
 class Queue(_Queue):
-    """This just adds a little syntactic sugar to the `asyncio.Queue`."""
+    """
+    Adds a little syntactic sugar to the :code:`asyncio.Queue`.
+
+    Allows being used as an async context manager awaiting `get` upon entering the context and calling
+    :meth:`item_processed` upon exiting it.
+    """
 
     def item_processed(self) -> None:
         """
-        Does exactly the same as `task_done()`.
+        Does exactly the same as :meth:`asyncio.Queue.task_done`.
 
         This method exists because `task_done` is an atrocious name for the method. It communicates the wrong thing,
         invites confusion, and immensely reduces readability (in the context of this library). And readability counts.
@@ -39,7 +47,7 @@ class Queue(_Queue):
         """
         Implements an asynchronous context manager for the queue.
 
-        Upon entering `get()` is awaited and subsequently whatever came out of the queue is returned.
+        Upon entering :meth:`get` is awaited and subsequently whatever came out of the queue is returned.
         It allows writing code this way:
         >>> queue = Queue()
         >>> ...
@@ -52,7 +60,7 @@ class Queue(_Queue):
         """
         Implements an asynchronous context manager for the queue.
 
-        Upon exiting `item_processed()` is called. This is why this context manager may not always be what you want,
+        Upon exiting :meth:`item_processed` is called. This is why this context manager may not always be what you want,
         but in some situations it makes the code much cleaner.
         """
         self.item_processed()

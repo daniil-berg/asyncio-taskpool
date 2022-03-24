@@ -1,2 +1,4 @@
 -r common.txt
 coverage
+sphinx
+sphinx-rtd-theme

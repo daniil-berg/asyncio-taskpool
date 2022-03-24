@@ -16,15 +16,16 @@ If not, see <https://www.gnu.org/licenses/>."""
 
 __doc__ = """
 Constants used by more than one module in the package.
+
+This module should **not** be considered part of the public API.
 """
 
 
 PACKAGE_NAME = 'asyncio_taskpool'
 
-DEFAULT_TASK_GROUP = ''
-DATETIME_FORMAT = '%Y-%m-%d_%H-%M-%S'
+DEFAULT_TASK_GROUP = 'default'
 
-CLIENT_EXIT = 'exit'
+DATETIME_FORMAT = '%Y-%m-%d_%H-%M-%S'
 
 SESSION_MSG_BYTES = 1024 * 100
 

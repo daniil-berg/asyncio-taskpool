@@ -25,7 +25,7 @@ from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
 from asyncio_taskpool.control import session
-from asyncio_taskpool.constants import CLIENT_INFO, CMD, SESSION_MSG_BYTES, STREAM_WRITER
+from asyncio_taskpool.internals.constants import CLIENT_INFO, CMD, SESSION_MSG_BYTES, STREAM_WRITER
 from asyncio_taskpool.exceptions import HelpRequested
 from asyncio_taskpool.pool import SimpleTaskPool
 

@@ -3,9 +3,10 @@
 # IDE settings:
 /.idea/
 /.vscode/
-# Distribution / packaging:
+# Distribution / build files:
 *.egg-info/
 /dist/
+/docs/build/
 # Python cache:
 __pycache__/
 # Testing:

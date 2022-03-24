@@ -15,7 +15,7 @@ You should have received a copy of the GNU Lesser General Public License along w
 If not, see <https://www.gnu.org/licenses/>."""
 
 __doc__ = """
-CLI client entry point.
+CLI entry point script for a :class:`ControlClient`.
 """
 
 
@@ -24,10 +24,13 @@ from asyncio import run
 from pathlib import Path
 from typing import Any, Dict, Sequence
 
-from ..constants import PACKAGE_NAME
+from ..internals.constants import PACKAGE_NAME
 from ..pool import TaskPool
-from .client import ControlClient, TCPControlClient, UnixControlClient
+from .client import TCPControlClient, UnixControlClient
 from .server import TCPControlServer, UnixControlServer
+
+
+__all__ = []
 
 
 CLIENT_CLASS = 'client_class'
@@ -39,7 +42,7 @@ HOST, PORT = 'host', 'port'
 def parse_cli(args: Sequence[str] = None) -> Dict[str, Any]:
     parser = ArgumentParser(
         prog=f'{PACKAGE_NAME}.control',
-        description=f"Simple CLI based {ControlClient.__name__} for {PACKAGE_NAME}"
+        description=f"Simple CLI based control client for {PACKAGE_NAME}"
     )
     subparsers = parser.add_subparsers(title="Connection types")
 

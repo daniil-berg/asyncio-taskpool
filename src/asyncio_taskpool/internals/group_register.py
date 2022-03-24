@@ -15,7 +15,9 @@ You should have received a copy of the GNU Lesser General Public License along w
 If not, see <https://www.gnu.org/licenses/>."""
 
 __doc__ = """
-This module contains the definition of the `TaskGroupRegister` class.
+Definition of :class:`TaskGroupRegister`.
+
+It should not be considered part of the public API.
 """
 
 
@@ -26,9 +28,9 @@ from typing import Iterator, Set
 
 class TaskGroupRegister(MutableSet):
     """
-    This class combines the interface of a regular `set` with that of the `asyncio.Lock`.
+    Combines the interface of a regular `set` with that of the `asyncio.Lock`.
 
-    It serves simultaneously as a container of IDs of tasks that belong to the same group, and as a mechanism for
+    Serves simultaneously as a container of IDs of tasks that belong to the same group, and as a mechanism for
     preventing race conditions within a task group. The lock should be acquired before cancelling the entire group of
     tasks, as well as before starting a task within the group.
     """

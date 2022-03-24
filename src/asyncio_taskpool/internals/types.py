@@ -16,6 +16,8 @@ If not, see <https://www.gnu.org/licenses/>."""
 
 __doc__ = """
 Custom type definitions used in various modules.
+
+This module should **not** be considered part of the public API.
 """
 
 

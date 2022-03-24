@@ -28,8 +28,8 @@ from typing import Iterable
 
 from asyncio_taskpool.control import parser
 from asyncio_taskpool.exceptions import HelpRequested, ParserError
-from asyncio_taskpool.helpers import resolve_dotted_path
-from asyncio_taskpool.types import ArgsT, CancelCB, CoroutineFunc, EndCB, KwArgsT
+from asyncio_taskpool.internals.helpers import resolve_dotted_path
+from asyncio_taskpool.internals.types import ArgsT, CancelCB, CoroutineFunc, EndCB, KwArgsT
 
 
 FOO, BAR = 'foo', 'bar'

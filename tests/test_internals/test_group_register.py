@@ -21,10 +21,9 @@ Unittests for the `asyncio_taskpool.group_register` module.
 
 from asyncio.locks import Lock
 from unittest import IsolatedAsyncioTestCase
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
-from asyncio_taskpool import group_register
-
+from asyncio_taskpool.internals import group_register
 
 FOO, BAR = 'foo', 'bar'
 

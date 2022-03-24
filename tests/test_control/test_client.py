@@ -28,7 +28,7 @@ from unittest import IsolatedAsyncioTestCase, skipIf
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 from asyncio_taskpool.control import client
-from asyncio_taskpool.constants import CLIENT_INFO, SESSION_MSG_BYTES
+from asyncio_taskpool.internals.constants import CLIENT_INFO, SESSION_MSG_BYTES
 
 
 FOO, BAR = 'foo', 'bar'
