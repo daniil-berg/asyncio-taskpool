@@ -81,12 +81,6 @@ class HelpersTestCase(IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             helpers.star_function(f, a, 123456789)
 
-    async def test_join_queue(self):
-        mock_join = AsyncMock()
-        mock_queue = MagicMock(join=mock_join)
-        self.assertIsNone(await helpers.join_queue(mock_queue))
-        mock_join.assert_awaited_once_with()
-
     def test_get_first_doc_line(self):
         expected_output = 'foo bar baz'
         mock_obj = MagicMock(__doc__=f"""{expected_output} 

@@ -20,7 +20,6 @@ Miscellaneous helper functions. None of these should be considered part of the p
 
 
 from asyncio.coroutines import iscoroutinefunction
-from asyncio.queues import Queue
 from importlib import import_module
 from inspect import getdoc
 from typing import Any, Optional, Union
@@ -84,11 +83,6 @@ def star_function(function: AnyCallableT, arg: Any, arg_stars: int = 0) -> T:
     if arg_stars == 2:
         return function(**arg)
     raise ValueError(f"Invalid argument arg_stars={arg_stars}; must be 0, 1, or 2.")
-
-
-async def join_queue(q: Queue) -> None:
-    """Wrapper function around the join method of an `asyncio.Queue` instance."""
-    await q.join()
 
 
 def get_first_doc_line(obj: object) -> str:
