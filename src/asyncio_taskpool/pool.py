@@ -31,15 +31,13 @@ import logging
 from asyncio.coroutines import iscoroutine, iscoroutinefunction
 from asyncio.exceptions import CancelledError
 from asyncio.locks import Semaphore
-from asyncio.queues import QueueEmpty
 from asyncio.tasks import Task, create_task, gather
 from contextlib import suppress
 from datetime import datetime
 from math import inf
-from typing import Any, Awaitable, Dict, Iterable, Iterator, List, Set, Union
+from typing import Any, Awaitable, Dict, Iterable, List, Set, Union
 
 from . import exceptions
-from .queue_context import Queue
 from .internals.constants import DEFAULT_TASK_GROUP, DATETIME_FORMAT
 from .internals.group_register import TaskGroupRegister
 from .internals.helpers import execute_optional, star_function
@@ -491,8 +489,6 @@ class TaskPool(BaseTaskPool):
     Adding tasks blocks **only if** the pool is full at that moment.
     """
 
-    _QUEUE_END_SENTINEL = object()
-
     def __init__(self, pool_size: int = inf, name: str = None) -> None:
         super().__init__(pool_size=pool_size, name=name)
         # In addition to all the attributes of the base class, we need a dictionary mapping task group names to sets of
@@ -714,34 +710,6 @@ class TaskPool(BaseTaskPool):
         await task
         return group_name
 
-    @classmethod
-    async def _queue_producer(cls, arg_queue: Queue, arg_iter: Iterator[Any], group_name: str) -> None:
-        """
-        Keeps the arguments queue from :meth:`_map` full as long as the iterator has elements.
-
-        Intended to be run as a meta task of a specific group.
-
-        Args:
-            arg_queue: The queue of function arguments to consume for starting a new task.
-            arg_iter: The iterator of function arguments to put into the queue.
-            group_name: Name of the task group associated with this producer.
-        """
-        try:
-            for arg in arg_iter:
-                await arg_queue.put(arg)  # This blocks as long as the queue is full.
-        except CancelledError:
-            # This means that no more tasks are supposed to be created from this `_map()` call;
-            # thus, we can immediately drain the entire queue and forget about the rest of the arguments.
-            log.debug("Cancelled consumption of argument iterable in task group '%s'", group_name)
-            while True:
-                try:
-                    arg_queue.get_nowait()
-                    arg_queue.item_processed()
-                except QueueEmpty:
-                    return
-        finally:
-            await arg_queue.put(cls._QUEUE_END_SENTINEL)
-
     @staticmethod
     def _get_map_end_callback(map_semaphore: Semaphore, actual_end_callback: EndCB) -> EndCB:
         """Returns a wrapped `end_callback` for each :meth:`_queue_consumer` task that releases the `map_semaphore`."""
@@ -750,23 +718,25 @@ class TaskPool(BaseTaskPool):
             await execute_optional(actual_end_callback, args=(task_id,))
         return release_callback
 
-    async def _queue_consumer(self, arg_queue: Queue, group_name: str, func: CoroutineFunc, arg_stars: int = 0,
-                              end_callback: EndCB = None, cancel_callback: CancelCB = None) -> None:
+    async def _arg_consumer(self, group_name: str, group_size: int, func: CoroutineFunc, arg_iter: ArgsT,
+                            arg_stars: int, end_callback: EndCB = None, cancel_callback: CancelCB = None) -> None:
         """
-        Consumes arguments from the queue from :meth:`_map` and keeps a limited number of tasks working on them.
+        Consumes arguments from :meth:`_map` and keeps a limited number of tasks working on them.
 
-        The queue's maximum size is taken as the limiting value of an internal semaphore, which must be acquired before
-        a new task can be started, and which must be released when one of these tasks ends.
+        The `group_size` acts as the limiting value of an internal semaphore, which must be acquired before a new task
+        can be started, and which must be released when one of these tasks ends.
 
         Intended to be run as a meta task of a specific group.
 
         Args:
-            arg_queue:
-                The queue of function arguments to consume for starting a new task.
             group_name:
                 Name of the associated task group; passed into :meth:`_start_task`.
+            group_size:
+                The maximum number new tasks spawned by this method to run concurrently.
             func:
                 The coroutine function to use for spawning the new tasks within the task pool.
+            arg_iter:
+                The iterable of arguments; each element is to be passed into a `func` call when spawning a new task.
             arg_stars (optional):
                 Whether or not to unpack an element from `arg_queue` using stars; must be 0, 1, or 2.
             end_callback (optional):
@@ -776,29 +746,27 @@ class TaskPool(BaseTaskPool):
                 The callback that was specified to execute after cancellation of the task (and the next one).
                 It is run with the task's ID as its only positional argument.
         """
-        map_semaphore = Semaphore(arg_queue.maxsize)  # value determined by `group_size` in :meth:`_map`
+        map_semaphore = Semaphore(group_size)
         release_cb = self._get_map_end_callback(map_semaphore, actual_end_callback=end_callback)
-        while True:
-            # The following line blocks **only if** the number of running tasks spawned by this method has reached the
-            # specified maximum as determined in :meth:`_map`.
+        for next_arg in arg_iter:
+            # When the number of running tasks spawned by this method reaches the specified maximum,
+            # this next line will block, until one of them ends and releases the semaphore.
             await map_semaphore.acquire()
-            # We await the queue's `get()` coroutine and ensure that its `item_processed()` method is called.
-            async with arg_queue as next_arg:
-                if next_arg is self._QUEUE_END_SENTINEL:
-                    # The :meth:`_queue_producer` either reached the last argument or was cancelled.
-                    return
-                try:
-                    await self._start_task(star_function(func, next_arg, arg_stars=arg_stars), group_name=group_name,
-                                           ignore_lock=True, end_callback=release_cb, cancel_callback=cancel_callback)
-                except CancelledError:
-                    map_semaphore.release()
-                    return
-                except Exception as e:
-                    # This means an exception occurred during task **creation**, meaning no task has been created.
-                    # It does not imply an error within the task itself.
-                    log.exception("%s occurred while trying to create task: %s(%s%s)",
-                                  str(e.__class__.__name__), func.__name__, '*' * arg_stars, str(next_arg))
-                    map_semaphore.release()
+            try:
+                await self._start_task(star_function(func, next_arg, arg_stars=arg_stars), group_name=group_name,
+                                       ignore_lock=True, end_callback=release_cb, cancel_callback=cancel_callback)
+            except CancelledError:
+                # This means that no more tasks are supposed to be created from this `arg_iter`;
+                # thus, we can forget about the rest of the arguments.
+                log.debug("Cancelled consumption of argument iterable in task group '%s'", group_name)
+                map_semaphore.release()
+                return
+            except Exception as e:
+                # This means an exception occurred during task **creation**, meaning no task has been created.
+                # It does not imply an error within the task itself.
+                log.exception("%s occurred while trying to create task: %s(%s%s)",
+                              str(e.__class__.__name__), func.__name__, '*' * arg_stars, str(next_arg))
+                map_semaphore.release()
 
     async def _map(self, group_name: str, group_size: int, func: CoroutineFunc, arg_iter: ArgsT, arg_stars: int,
                    end_callback: EndCB = None, cancel_callback: CancelCB = None) -> None:
@@ -815,11 +783,9 @@ class TaskPool(BaseTaskPool):
         of the pool never imposes a limit, this ensures that the number of tasks belonging to this group and running
         concurrently is always equal to `group_size` (except for when `arg_iter` is exhausted of course).
 
-        This method sets up an internal arguments queue which is continuously filled while consuming the `arg_iter`.
-        Because this method delegates the spawning of the tasks to two meta tasks (a producer and a consumer of the
-        aforementioned queue), it **never blocks**. However, just because this method returns immediately, this does
-        not mean that any task was started or that any number of tasks will start soon, as this is solely determined by
-        the :attr:`BaseTaskPool.pool_size` and the `group_size`.
+        Because this method delegates the spawning of the tasks to a meta task, it **never blocks**. However, just
+        because this method returns immediately, this does not mean that any task was started or that any number of
+        tasks will start soon, as this is solely determined by the :attr:`BaseTaskPool.pool_size` and the `group_size`.
 
         Args:
             group_name:
@@ -850,17 +816,9 @@ class TaskPool(BaseTaskPool):
             raise exceptions.InvalidGroupName(f"Group named {group_name} already exists!")
         self._task_groups[group_name] = group_reg = TaskGroupRegister()
         async with group_reg:
-            # Set up internal arguments queue. We limit its maximum size to enable lazy consumption of `arg_iter` by the
-            # `_queue_producer()`; that way an argument
-            # TODO: Perhaps this can be simplified to just one meta-task with no need for a queue.
-            #       The limiting factor honoring the group size is already the semaphore in the queue consumer;
-            #       Try to write this without a producer, instead consuming the `arg_iter` directly.
-            arg_queue = Queue(maxsize=group_size)
             meta_tasks = self._group_meta_tasks_running.setdefault(group_name, set())
-            # Start the producer and consumer meta tasks.
-            meta_tasks.add(create_task(self._queue_producer(arg_queue, iter(arg_iter), group_name)))
-            meta_tasks.add(create_task(self._queue_consumer(arg_queue, group_name, func, arg_stars,
-                                                            end_callback, cancel_callback)))
+            meta_tasks.add(create_task(self._arg_consumer(group_name, group_size, func, arg_iter, arg_stars,
+                                                          end_callback=end_callback, cancel_callback=cancel_callback)))
 
     async def map(self, func: CoroutineFunc, arg_iter: ArgsT, group_size: int = 1, group_name: str = None,
                   end_callback: EndCB = None, cancel_callback: CancelCB = None) -> str:
