@@ -35,7 +35,7 @@ from asyncio_taskpool.internals.types import ArgsT, CancelCB, CoroutineFunc, End
 FOO, BAR = 'foo', 'bar'
 
 
-class ControlServerTestCase(TestCase):
+class ControlParserTestCase(TestCase):
 
     def setUp(self) -> None:
         self.help_formatter_factory_patcher = patch.object(parser.ControlParser, 'help_formatter_factory')
@@ -265,11 +265,35 @@ class ControlServerTestCase(TestCase):
 
 
 class RestTestCase(TestCase):
+    log_lvl: int
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.log_lvl = parser.log.level
+        parser.log.setLevel(999)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        parser.log.setLevel(cls.log_lvl)
+
     def test__get_arg_type_wrapper(self):
         type_wrap = parser._get_arg_type_wrapper(int)
         self.assertEqual('int', type_wrap.__name__)
         self.assertEqual(SUPPRESS, type_wrap(SUPPRESS))
         self.assertEqual(13, type_wrap('13'))
+
+        name = 'abcdef'
+        mock_type = MagicMock(side_effect=[parser.ArgumentTypeError, TypeError, ValueError, Exception], __name__=name)
+        type_wrap = parser._get_arg_type_wrapper(mock_type)
+        self.assertEqual(name, type_wrap.__name__)
+        with self.assertRaises(parser.ArgumentTypeError):
+            type_wrap(FOO)
+        with self.assertRaises(TypeError):
+            type_wrap(FOO)
+        with self.assertRaises(ValueError):
+            type_wrap(FOO)
+        with self.assertRaises(parser.ArgumentTypeError):
+            type_wrap(FOO)
 
     @patch.object(parser, '_get_arg_type_wrapper')
     def test__get_type_from_annotation(self, mock__get_arg_type_wrapper: MagicMock):

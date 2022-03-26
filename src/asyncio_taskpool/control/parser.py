@@ -20,7 +20,8 @@ Definition of the :class:`ControlParser` used in a
 """
 
 
-from argparse import Action, ArgumentParser, ArgumentDefaultsHelpFormatter, HelpFormatter, SUPPRESS
+import logging
+from argparse import Action, ArgumentParser, ArgumentDefaultsHelpFormatter, HelpFormatter, ArgumentTypeError, SUPPRESS
 from ast import literal_eval
 from asyncio.streams import StreamWriter
 from inspect import Parameter, getmembers, isfunction, signature
@@ -34,6 +35,9 @@ from ..internals.types import ArgsT, CancelCB, CoroutineFunc, EndCB, KwArgsT
 
 
 __all__ = ['ControlParser']
+
+
+log = logging.getLogger(__name__)
 
 
 FmtCls = TypeVar('FmtCls', bound=Type[HelpFormatter])
@@ -300,8 +304,21 @@ def _get_arg_type_wrapper(cls: Type) -> Callable[[Any], Any]:
     Returns a wrapper for the constructor of `cls` to avoid a ValueError being raised on suppressed arguments.
 
     See: https://bugs.python.org/issue36078
+
+    In addition, the type conversion wrapper catches exceptions not handled properly by the parser, logs them, and
+    turns them into `ArgumentTypeError` exceptions the parser can propagate to the client.
     """
-    def wrapper(arg: Any) -> Any: return arg if arg is SUPPRESS else cls(arg)
+    def wrapper(arg: Any) -> Any:
+        if arg is SUPPRESS:
+            return arg
+        try:
+            return cls(arg)
+        except (ArgumentTypeError, TypeError, ValueError):
+            raise  # handled properly by the parser and propagated to the client anyway
+        except Exception as e:
+            text = f"{e.__class__.__name__} occurred in parser trying to convert type: {cls.__name__}({repr(arg)})"
+            log.exception(text)
+            raise ArgumentTypeError(text)  # propagate to the client
     # Copy the name of the class to maintain useful help messages when incorrect arguments are passed.
     wrapper.__name__ = cls.__name__
     return wrapper
