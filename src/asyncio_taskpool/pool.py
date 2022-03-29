@@ -668,7 +668,9 @@ class TaskPool(BaseTaskPool):
 
         All the new tasks are added to the same task group.
 
-        This method blocks, **only if** the pool has not enough room to accommodate `num` new tasks.
+        Because this method delegates the spawning of the tasks to a meta task, it **never blocks**. However, just
+        because this method returns immediately, this does not mean that any task was started or that any number of
+        tasks will start soon, as this is solely determined by the :attr:`BaseTaskPool.pool_size` and `num`.
 
         Args:
             func:
@@ -701,8 +703,9 @@ class TaskPool(BaseTaskPool):
             group_name = self._generate_group_name('apply', func)
         group_reg = self._task_groups.setdefault(group_name, TaskGroupRegister())
         async with group_reg:
-            task = create_task(self._apply_num(group_name, func, args, kwargs, num, end_callback, cancel_callback))
-        await task
+            meta_tasks = self._group_meta_tasks_running.setdefault(group_name, set())
+            meta_tasks.add(create_task(self._apply_num(group_name, func, args, kwargs, num,
+                                                       end_callback=end_callback, cancel_callback=cancel_callback)))
         return group_name
 
     @staticmethod

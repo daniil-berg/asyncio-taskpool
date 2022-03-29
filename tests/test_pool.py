@@ -513,8 +513,7 @@ class TaskPoolTestCase(CommonTestCase):
         mock__generate_group_name.return_value = generated_name = 'name 123'
         mock_group_reg = set_up_mock_group_register(mock_reg_cls)
         mock__apply_num.return_value = mock_apply_coroutine = object()
-        mock_task_future = AsyncMock()
-        mock_create_task.return_value = mock_task_future()
+        mock_create_task.return_value = fake_task = object()
         mock_func, num, group_name = MagicMock(), 3, FOO + BAR
         args, kwargs = (FOO, BAR), {'a': 1, 'b': 2}
         end_cb, cancel_cb = MagicMock(), MagicMock()
@@ -525,10 +524,11 @@ class TaskPoolTestCase(CommonTestCase):
             mock__check_start.assert_called_once_with(function=mock_func)
             self.assertEqual(mock_group_reg, self.task_pool._task_groups[_group_name])
             mock_group_reg.__aenter__.assert_awaited_once_with()
-            mock__apply_num.assert_called_once_with(_group_name, mock_func, args, kwargs, num, end_cb, cancel_cb)
+            mock__apply_num.assert_called_once_with(_group_name, mock_func, args, kwargs, num,
+                                                    end_callback=end_cb, cancel_callback=cancel_cb)
             mock_create_task.assert_called_once_with(mock_apply_coroutine)
             mock_group_reg.__aexit__.assert_awaited_once()
-            mock_task_future.assert_awaited_once_with()
+            self.assertSetEqual({fake_task}, self.task_pool._group_meta_tasks_running[group_name])
 
         output = await self.task_pool.apply(mock_func, args, kwargs, num, group_name, end_cb, cancel_cb)
         check_assertions(group_name, output)
@@ -540,8 +540,6 @@ class TaskPoolTestCase(CommonTestCase):
         mock__apply_num.reset_mock()
         mock_create_task.reset_mock()
         mock_group_reg.__aexit__.reset_mock()
-        mock_task_future = AsyncMock()
-        mock_create_task.return_value = mock_task_future()
 
         output = await self.task_pool.apply(mock_func, args, kwargs, num, None, end_cb, cancel_cb)
         check_assertions(generated_name, output)
