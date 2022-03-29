@@ -75,7 +75,6 @@ async def main() -> None:
     control_server_task.cancel()
     # Since our workers should now be stuck waiting for more items to pick from the queue, but no items are left,
     # we can now safely cancel their tasks.
-    pool.lock()
     pool.stop_all()
     # Finally, we allow for all tasks to do their cleanup (as if they need to do any) upon being cancelled.
     # We block until they all return or raise an exception, but since we are not interested in any of their exceptions,

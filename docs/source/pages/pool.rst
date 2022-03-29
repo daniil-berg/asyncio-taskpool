@@ -143,7 +143,6 @@ Or we could use a task pool:
        pool = TaskPool()
        await pool.map(another_worker_function, data_iterator, num_concurrent=5)
        ...
-       pool.lock()
        await pool.gather_and_close()
 
 Calling the :py:meth:`.map() <asyncio_taskpool.pool.TaskPool.map>` method this way ensures that there will **always**  -- i.e. at any given moment in time -- be exactly 5 tasks working concurrently on our data (assuming no other pool interaction).

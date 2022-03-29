@@ -44,7 +44,6 @@ async def main() -> None:
     await pool.start(1)  # launches work task 3
     await asyncio.sleep(1.5)  # lets the tasks work for a bit
     pool.stop(2)  # cancels tasks 3 and 2 (LIFO order)
-    pool.lock()  # required for the last line
     await pool.gather_and_close()  # awaits all tasks, then flushes the pool
 
 
@@ -137,9 +136,7 @@ async def main() -> None:
     args_list = [(0, 10), (10, 20), (20, 30), (30, 40)]
     await pool.starmap(other_work, args_list, num_concurrent=2)
     print("> Called `starmap`")
-    # Now we lock the pool, so that we can safely await all our tasks.
-    pool.lock()
-    # Finally, we block, until all tasks have ended.
+    # We block, until all tasks have ended.
     print("> Calling `gather_and_close`...")
     await pool.gather_and_close()
     print("> Done.")

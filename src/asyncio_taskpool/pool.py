@@ -450,9 +450,7 @@ class BaseTaskPool:
         """
         Gathers (i.e. awaits) **all** tasks in the pool, then closes it.
 
-        After this method returns, no more tasks can be started in the pool.
-
-        :meth:`lock` must have been called prior to this.
+        Once this method is called, no more tasks can be started in the pool.
 
         This method may block, if one of the tasks blocks while catching a `asyncio.CancelledError` or if any of the
         callbacks registered for a task blocks for whatever reason.
@@ -463,8 +461,7 @@ class BaseTaskPool:
         Raises:
             `PoolStillUnlocked`: The pool has not been locked yet.
         """
-        if not self._locked:
-            raise exceptions.PoolStillUnlocked("Pool must be locked, before tasks can be gathered")
+        self.lock()
         await gather(*self._tasks_ended.values(), *self._tasks_cancelled.values(), *self._tasks_running.values(),
                      return_exceptions=return_exceptions)
         self._tasks_ended.clear()
@@ -595,9 +592,7 @@ class TaskPool(BaseTaskPool):
         """
         Gathers (i.e. awaits) **all** tasks in the pool, then closes it.
 
-        After this method returns, no more tasks can be started in the pool.
-
-        The `lock()` method must have been called prior to this.
+        Once this method is called, no more tasks can be started in the pool.
 
         Note that this method may block indefinitely as long as any task in the pool is not done. This includes meta
         tasks launched by methods such as :meth:`map`, which end by themselves, only once the arguments iterator is

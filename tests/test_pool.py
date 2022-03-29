@@ -366,16 +366,9 @@ class BaseTaskPoolTestCase(CommonTestCase):
     async def test_gather_and_close(self):
         mock_running_func = AsyncMock()
         mock_ended_func, mock_cancelled_func = AsyncMock(), AsyncMock(side_effect=Exception)
-        self.task_pool._tasks_ended = ended = {123: mock_ended_func()}
-        self.task_pool._tasks_cancelled = cancelled = {456: mock_cancelled_func()}
-        self.task_pool._tasks_running = running = {789: mock_running_func()}
-
-        with self.assertRaises(exceptions.PoolStillUnlocked):
-            await self.task_pool.gather_and_close()
-        self.assertDictEqual(ended, self.task_pool._tasks_ended)
-        self.assertDictEqual(cancelled, self.task_pool._tasks_cancelled)
-        self.assertDictEqual(running, self.task_pool._tasks_running)
-        self.assertFalse(self.task_pool._closed)
+        self.task_pool._tasks_ended = {123: mock_ended_func()}
+        self.task_pool._tasks_cancelled = {456: mock_cancelled_func()}
+        self.task_pool._tasks_running = {789: mock_running_func()}
 
         self.task_pool._locked = True
         self.assertIsNone(await self.task_pool.gather_and_close(return_exceptions=True))

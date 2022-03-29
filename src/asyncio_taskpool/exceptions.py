@@ -51,10 +51,6 @@ class InvalidGroupName(PoolException):
     pass
 
 
-class PoolStillUnlocked(PoolException):
-    pass
-
-
 class NotCoroutine(PoolException):
     pass
 
