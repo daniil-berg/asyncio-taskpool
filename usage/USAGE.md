@@ -41,7 +41,7 @@ async def main() -> None:
     pool = SimpleTaskPool(work, args=(5,))  # initializes the pool; no work is being done yet
     await pool.start(3)  # launches work tasks 0, 1, and 2
     await asyncio.sleep(1.5)  # lets the tasks work for a bit
-    await pool.start()  # launches work task 3
+    await pool.start(1)  # launches work task 3
     await asyncio.sleep(1.5)  # lets the tasks work for a bit
     pool.stop(2)  # cancels tasks 3 and 2 (LIFO order)
     pool.lock()  # required for the last line
@@ -135,7 +135,7 @@ async def main() -> None:
     # Once there is room in the pool again, the third and fourth will each start (with IDs 4 and 5)
     # only once there is room in the pool and no more than one other task of these new ones is running.
     args_list = [(0, 10), (10, 20), (20, 30), (30, 40)]
-    await pool.starmap(other_work, args_list, group_size=2)
+    await pool.starmap(other_work, args_list, num_concurrent=2)
     print("> Called `starmap`")
     # Now we lock the pool, so that we can safely await all our tasks.
     pool.lock()
@@ -199,7 +199,7 @@ Started TaskPool-0_Task-3
 > other_work with 15
 Ended TaskPool-0_Task-0
 Ended TaskPool-0_Task-1    <--- these two end and free up two more slots in the pool
-Started TaskPool-0_Task-4    <--- since the group size is set to 2, Task-5 will not start
+Started TaskPool-0_Task-4    <--- since `num_concurrent` is set to 2, Task-5 will not start
 > work with 190
 > work with 190
 > other_work with 16

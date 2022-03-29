@@ -46,7 +46,7 @@ Let's take a look at an example. Say you have a coroutine function that takes tw
    async def queue_worker_function(in_queue: Queue, out_queue: Queue) -> None:
        while True:
            item = await in_queue.get()
-           ... # Do some work on the item amd arrive at a result.
+           ... # Do some work on the item and arrive at a result.
            await out_queue.put(result)
 
 How would we go about concurrently executing this function, say 5 times? There are (as always) a number of ways to do this with :code:`asyncio`. If we want to use tasks and be clean about it, we can do it like this:
@@ -141,7 +141,7 @@ Or we could use a task pool:
    async def main():
        ...
        pool = TaskPool()
-       await pool.map(another_worker_function, data_iterator, group_size=5)
+       await pool.map(another_worker_function, data_iterator, num_concurrent=5)
        ...
        pool.lock()
        await pool.gather_and_close()
@@ -231,5 +231,6 @@ One method to be aware of is :py:meth:`.flush() <asyncio_taskpool.pool.BaseTaskP
 
 In general, the act of adding tasks to a pool is non-blocking, no matter which particular methods are used. The only notable exception is when a limit on the pool size has been set and there is "not enough room" to add a task. In this case, both :py:meth:`SimpleTaskPool.start() <asyncio_taskpool.pool.SimpleTaskPool.start>` and :py:meth:`TaskPool.apply() <asyncio_taskpool.pool.TaskPool.apply>` will block until the desired number of new tasks found room in the pool (either because other tasks have ended or because the pool size was increased).
 
-:py:meth:`TaskPool.map() <asyncio_taskpool.pool.TaskPool.map>` (and its variants) will **never** block. Since it makes use of "meta-tasks" under the hood, it will always return immediately. However, if the pool was full when it was called, there is **no guarantee** that even a single task has started, when the method returns.
+:py:meth:`TaskPool.map() <asyncio_taskpool.pool.TaskPool.map>` (and its variants) will **never** block. Since it makes use of a "meta-task" under the hood, it will always return immediately. However, if the pool was full when it was called, there is **no guarantee** that even a single task has started, when the method returns.
+:py:meth:`TaskPool.map() <asyncio_taskpool.pool.TaskPool.map>` (and its variants) will **never** block. Since it makes use of a "meta-task" under the hood, it will always return immediately. However, if the pool was full when it was called, there is **no guarantee** that even a single task has started, when the method returns.
 

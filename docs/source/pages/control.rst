@@ -96,9 +96,9 @@ When you are dealing with a regular :py:class:`TaskPool <asyncio_taskpool.pool.T
 
 .. code-block:: none
 
-   > map mypackage.mymodule.worker ['x','y','z'] -g 3
+   > map mypackage.mymodule.worker ['x','y','z'] -n 3
 
-The :code:`-g` is a shorthand for :code:`--group-size` in this case. In general, all (public) pool methods will have a corresponding command in the control session.
+The :code:`-n` is a shorthand for :code:`--num-concurrent` in this case. In general, all (public) pool methods will have a corresponding command in the control session.
 
 .. note::
 
