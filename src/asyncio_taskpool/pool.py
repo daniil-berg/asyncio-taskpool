@@ -409,7 +409,7 @@ class BaseTaskPool:
                 continue
         log.debug("%s cancelled tasks from group %s", str(self), group_name)
 
-    async def cancel_group(self, group_name: str, msg: str = None) -> None:
+    def cancel_group(self, group_name: str, msg: str = None) -> None:
         """
         Cancels an entire group of tasks.
 
@@ -431,11 +431,10 @@ class BaseTaskPool:
             group_reg = self._task_groups.pop(group_name)
         except KeyError:
             raise exceptions.InvalidGroupName(f"No task group named {group_name} exists in this pool.")
-        async with group_reg:
-            self._cancel_and_remove_all_from_group(group_name, group_reg, msg=msg)
+        self._cancel_and_remove_all_from_group(group_name, group_reg, msg=msg)
         log.debug("%s forgot task group %s", str(self), group_name)
 
-    async def cancel_all(self, msg: str = None) -> None:
+    def cancel_all(self, msg: str = None) -> None:
         """
         Cancels all tasks still running within the pool (including meta tasks).
 
@@ -449,8 +448,7 @@ class BaseTaskPool:
         log.warning("%s cancelling all tasks!", str(self))
         while self._task_groups:
             group_name, group_reg = self._task_groups.popitem()
-            async with group_reg:
-                self._cancel_and_remove_all_from_group(group_name, group_reg, msg=msg)
+            self._cancel_and_remove_all_from_group(group_name, group_reg, msg=msg)
 
     def _pop_ended_meta_tasks(self) -> Set[Task]:
         """
@@ -598,8 +596,8 @@ class TaskPool(BaseTaskPool):
         await gather(*(self._start_task(func(*args, **kwargs), group_name=group_name, end_callback=end_callback,
                                         cancel_callback=cancel_callback) for _ in range(num)))
 
-    async def apply(self, func: CoroutineFunc, args: ArgsT = (), kwargs: KwArgsT = None, num: int = 1,
-                    group_name: str = None, end_callback: EndCB = None, cancel_callback: CancelCB = None) -> str:
+    def apply(self, func: CoroutineFunc, args: ArgsT = (), kwargs: KwArgsT = None, num: int = 1, group_name: str = None,
+              end_callback: EndCB = None, cancel_callback: CancelCB = None) -> str:
         """
         Creates tasks with the supplied arguments to be run in the pool.
 
@@ -646,11 +644,10 @@ class TaskPool(BaseTaskPool):
         self._check_start(function=func)
         if group_name is None:
             group_name = self._generate_group_name('apply', func)
-        group_reg = self._task_groups.setdefault(group_name, TaskGroupRegister())
-        async with group_reg:
-            meta_tasks = self._group_meta_tasks_running.setdefault(group_name, set())
-            meta_tasks.add(create_task(self._apply_num(group_name, func, args, kwargs, num,
-                                                       end_callback=end_callback, cancel_callback=cancel_callback)))
+        self._task_groups.setdefault(group_name, TaskGroupRegister())
+        meta_tasks = self._group_meta_tasks_running.setdefault(group_name, set())
+        meta_tasks.add(create_task(self._apply_num(group_name, func, args, kwargs, num,
+                                                   end_callback=end_callback, cancel_callback=cancel_callback)))
         return group_name
 
     @staticmethod
@@ -711,8 +708,8 @@ class TaskPool(BaseTaskPool):
                               str(e.__class__.__name__), func.__name__, '*' * arg_stars, str(next_arg))
                 map_semaphore.release()
 
-    async def _map(self, group_name: str, num_concurrent: int, func: CoroutineFunc, arg_iter: ArgsT, arg_stars: int,
-                   end_callback: EndCB = None, cancel_callback: CancelCB = None) -> None:
+    def _map(self, group_name: str, num_concurrent: int, func: CoroutineFunc, arg_iter: ArgsT, arg_stars: int,
+             end_callback: EndCB = None, cancel_callback: CancelCB = None) -> None:
         """
         Creates tasks in the pool with arguments from the supplied iterable.
 
@@ -760,14 +757,13 @@ class TaskPool(BaseTaskPool):
             raise ValueError("`num_concurrent` must be a positive integer.")
         if group_name in self._task_groups.keys():
             raise exceptions.InvalidGroupName(f"Group named {group_name} already exists!")
-        self._task_groups[group_name] = group_reg = TaskGroupRegister()
-        async with group_reg:
-            meta_tasks = self._group_meta_tasks_running.setdefault(group_name, set())
-            meta_tasks.add(create_task(self._arg_consumer(group_name, num_concurrent, func, arg_iter, arg_stars,
-                                                          end_callback=end_callback, cancel_callback=cancel_callback)))
+        self._task_groups[group_name] = TaskGroupRegister()
+        meta_tasks = self._group_meta_tasks_running.setdefault(group_name, set())
+        meta_tasks.add(create_task(self._arg_consumer(group_name, num_concurrent, func, arg_iter, arg_stars,
+                                                      end_callback=end_callback, cancel_callback=cancel_callback)))
 
-    async def map(self, func: CoroutineFunc, arg_iter: ArgsT, num_concurrent: int = 1, group_name: str = None,
-                  end_callback: EndCB = None, cancel_callback: CancelCB = None) -> str:
+    def map(self, func: CoroutineFunc, arg_iter: ArgsT, num_concurrent: int = 1, group_name: str = None,
+            end_callback: EndCB = None, cancel_callback: CancelCB = None) -> str:
         """
         A task-based equivalent of the `multiprocessing.pool.Pool.map` method.
 
@@ -819,12 +815,12 @@ class TaskPool(BaseTaskPool):
         """
         if group_name is None:
             group_name = self._generate_group_name('map', func)
-        await self._map(group_name, num_concurrent, func, arg_iter, 0,
-                        end_callback=end_callback, cancel_callback=cancel_callback)
+        self._map(group_name, num_concurrent, func, arg_iter, 0,
+                  end_callback=end_callback, cancel_callback=cancel_callback)
         return group_name
 
-    async def starmap(self, func: CoroutineFunc, args_iter: Iterable[ArgsT], num_concurrent: int = 1,
-                      group_name: str = None, end_callback: EndCB = None, cancel_callback: CancelCB = None) -> str:
+    def starmap(self, func: CoroutineFunc, args_iter: Iterable[ArgsT], num_concurrent: int = 1, group_name: str = None,
+                end_callback: EndCB = None, cancel_callback: CancelCB = None) -> str:
         """
         Like :meth:`map` except that the elements of `args_iter` are expected to be iterables themselves to be unpacked
         as positional arguments to the function.
@@ -836,13 +832,12 @@ class TaskPool(BaseTaskPool):
         """
         if group_name is None:
             group_name = self._generate_group_name('starmap', func)
-        await self._map(group_name, num_concurrent, func, args_iter, 1,
-                        end_callback=end_callback, cancel_callback=cancel_callback)
+        self._map(group_name, num_concurrent, func, args_iter, 1,
+                  end_callback=end_callback, cancel_callback=cancel_callback)
         return group_name
 
-    async def doublestarmap(self, func: CoroutineFunc, kwargs_iter: Iterable[KwArgsT], num_concurrent: int = 1,
-                            group_name: str = None, end_callback: EndCB = None,
-                            cancel_callback: CancelCB = None) -> str:
+    def doublestarmap(self, func: CoroutineFunc, kwargs_iter: Iterable[KwArgsT], num_concurrent: int = 1,
+                      group_name: str = None, end_callback: EndCB = None, cancel_callback: CancelCB = None) -> str:
         """
         Like :meth:`map` except that the elements of `kwargs_iter` are expected to be iterables themselves to be
         unpacked as keyword-arguments to the function.
@@ -854,8 +849,8 @@ class TaskPool(BaseTaskPool):
         """
         if group_name is None:
             group_name = self._generate_group_name('doublestarmap', func)
-        await self._map(group_name, num_concurrent, func, kwargs_iter, 2,
-                        end_callback=end_callback, cancel_callback=cancel_callback)
+        self._map(group_name, num_concurrent, func, kwargs_iter, 2,
+                  end_callback=end_callback, cancel_callback=cancel_callback)
         return group_name
 
 

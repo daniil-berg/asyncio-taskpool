@@ -81,7 +81,7 @@ By contrast, here is how you would do it with a task pool:
 
    ...
    pool = TaskPool()
-   group_name = await pool.apply(queue_worker_function, args=(q_in, q_out), num=5)
+   group_name = pool.apply(queue_worker_function, args=(q_in, q_out), num=5)
    ...
    pool.cancel_group(group_name)
    ...
@@ -141,7 +141,7 @@ Or we could use a task pool:
    async def main():
        ...
        pool = TaskPool()
-       await pool.map(another_worker_function, data_iterator, num_concurrent=5)
+       pool.map(another_worker_function, data_iterator, num_concurrent=5)
        ...
        await pool.gather_and_close()
 

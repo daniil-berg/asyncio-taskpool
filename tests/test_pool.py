@@ -351,29 +351,24 @@ class BaseTaskPoolTestCase(CommonTestCase):
         mock_cancel.assert_called_once_with(msg=FOO)
 
     @patch.object(pool.BaseTaskPool, '_cancel_and_remove_all_from_group')
-    async def test_cancel_group(self, mock__cancel_and_remove_all_from_group: MagicMock):
-        mock_grp_aenter, mock_grp_aexit = AsyncMock(), AsyncMock()
-        mock_group_reg = MagicMock(__aenter__=mock_grp_aenter, __aexit__=mock_grp_aexit)
-        self.task_pool._task_groups[FOO] = mock_group_reg
+    def test_cancel_group(self, mock__cancel_and_remove_all_from_group: MagicMock):
+        self.task_pool._task_groups[FOO] = mock_group_reg = MagicMock()
         with self.assertRaises(exceptions.InvalidGroupName):
-            await self.task_pool.cancel_group(BAR)
+            self.task_pool.cancel_group(BAR)
         mock__cancel_and_remove_all_from_group.assert_not_called()
-        mock_grp_aenter.assert_not_called()
-        mock_grp_aexit.assert_not_called()
-        self.assertIsNone(await self.task_pool.cancel_group(FOO, msg=BAR))
+        self.assertIsNone(self.task_pool.cancel_group(FOO, msg=BAR))
+        self.assertDictEqual(EMPTY_DICT, self.task_pool._task_groups)
         mock__cancel_and_remove_all_from_group.assert_called_once_with(FOO, mock_group_reg, msg=BAR)
-        mock_grp_aenter.assert_awaited_once_with()
-        mock_grp_aexit.assert_awaited_once()
 
     @patch.object(pool.BaseTaskPool, '_cancel_and_remove_all_from_group')
-    async def test_cancel_all(self, mock__cancel_and_remove_all_from_group: MagicMock):
-        mock_grp_aenter, mock_grp_aexit = AsyncMock(), AsyncMock()
-        mock_group_reg = MagicMock(__aenter__=mock_grp_aenter, __aexit__=mock_grp_aexit)
-        self.task_pool._task_groups[BAR] = mock_group_reg
-        self.assertIsNone(await self.task_pool.cancel_all(FOO))
-        mock__cancel_and_remove_all_from_group.assert_called_once_with(BAR, mock_group_reg, msg=FOO)
-        mock_grp_aenter.assert_awaited_once_with()
-        mock_grp_aexit.assert_awaited_once()
+    def test_cancel_all(self, mock__cancel_and_remove_all_from_group: MagicMock):
+        mock_group_reg = MagicMock()
+        self.task_pool._task_groups = {FOO: mock_group_reg, BAR: mock_group_reg}
+        self.assertIsNone(self.task_pool.cancel_all('msg'))
+        mock__cancel_and_remove_all_from_group.assert_has_calls([
+            call(BAR, mock_group_reg, msg='msg'),
+            call(FOO, mock_group_reg, msg='msg')
+        ])
 
     def test__pop_ended_meta_tasks(self):
         mock_task, mock_done_task1 = MagicMock(done=lambda: False), MagicMock(done=lambda: True)
@@ -486,8 +481,8 @@ class TaskPoolTestCase(CommonTestCase):
     @patch.object(pool, 'TaskGroupRegister')
     @patch.object(pool.TaskPool, '_generate_group_name')
     @patch.object(pool.BaseTaskPool, '_check_start')
-    async def test_apply(self, mock__check_start: MagicMock, mock__generate_group_name: MagicMock,
-                         mock_reg_cls: MagicMock, mock__apply_num: MagicMock, mock_create_task: MagicMock):
+    def test_apply(self, mock__check_start: MagicMock, mock__generate_group_name: MagicMock,
+                   mock_reg_cls: MagicMock, mock__apply_num: MagicMock, mock_create_task: MagicMock):
         mock__generate_group_name.return_value = generated_name = 'name 123'
         mock_group_reg = set_up_mock_group_register(mock_reg_cls)
         mock__apply_num.return_value = mock_apply_coroutine = object()
@@ -501,25 +496,21 @@ class TaskPoolTestCase(CommonTestCase):
             self.assertEqual(_group_name, _output)
             mock__check_start.assert_called_once_with(function=mock_func)
             self.assertEqual(mock_group_reg, self.task_pool._task_groups[_group_name])
-            mock_group_reg.__aenter__.assert_awaited_once_with()
             mock__apply_num.assert_called_once_with(_group_name, mock_func, args, kwargs, num,
                                                     end_callback=end_cb, cancel_callback=cancel_cb)
             mock_create_task.assert_called_once_with(mock_apply_coroutine)
-            mock_group_reg.__aexit__.assert_awaited_once()
             self.assertSetEqual({fake_task}, self.task_pool._group_meta_tasks_running[group_name])
 
-        output = await self.task_pool.apply(mock_func, args, kwargs, num, group_name, end_cb, cancel_cb)
+        output = self.task_pool.apply(mock_func, args, kwargs, num, group_name, end_cb, cancel_cb)
         check_assertions(group_name, output)
         mock__generate_group_name.assert_not_called()
 
         mock__check_start.reset_mock()
         self.task_pool._task_groups.clear()
-        mock_group_reg.__aenter__.reset_mock()
         mock__apply_num.reset_mock()
         mock_create_task.reset_mock()
-        mock_group_reg.__aexit__.reset_mock()
 
-        output = await self.task_pool.apply(mock_func, args, kwargs, num, None, end_cb, cancel_cb)
+        output = self.task_pool.apply(mock_func, args, kwargs, num, None, end_cb, cancel_cb)
         check_assertions(generated_name, output)
         mock__generate_group_name.assert_called_once_with('apply', mock_func)
 
@@ -581,8 +572,8 @@ class TaskPoolTestCase(CommonTestCase):
     @patch.object(pool.TaskPool, '_arg_consumer', new_callable=MagicMock)
     @patch.object(pool, 'TaskGroupRegister')
     @patch.object(pool.BaseTaskPool, '_check_start')
-    async def test__map(self, mock__check_start: MagicMock, mock_reg_cls: MagicMock, mock__arg_consumer: MagicMock,
-                        mock_create_task: MagicMock):
+    def test__map(self, mock__check_start: MagicMock, mock_reg_cls: MagicMock, mock__arg_consumer: MagicMock,
+                  mock_create_task: MagicMock):
         mock_group_reg = set_up_mock_group_register(mock_reg_cls)
         mock__arg_consumer.return_value = fake_consumer = object()
         mock_create_task.return_value = fake_task = object()
@@ -592,7 +583,7 @@ class TaskPoolTestCase(CommonTestCase):
         end_cb, cancel_cb = MagicMock(), MagicMock()
 
         with self.assertRaises(ValueError):
-            await self.task_pool._map(group_name, n, func, arg_iter, stars, end_cb, cancel_cb)
+            self.task_pool._map(group_name, n, func, arg_iter, stars, end_cb, cancel_cb)
         mock__check_start.assert_called_once_with(function=func)
 
         mock__check_start.reset_mock()
@@ -601,82 +592,80 @@ class TaskPoolTestCase(CommonTestCase):
         self.task_pool._task_groups = {group_name: MagicMock()}
 
         with self.assertRaises(exceptions.InvalidGroupName):
-            await self.task_pool._map(group_name, n, func, arg_iter, stars, end_cb, cancel_cb)
+            self.task_pool._map(group_name, n, func, arg_iter, stars, end_cb, cancel_cb)
         mock__check_start.assert_called_once_with(function=func)
 
         mock__check_start.reset_mock()
 
         self.task_pool._task_groups.clear()
 
-        self.assertIsNone(await self.task_pool._map(group_name, n, func, arg_iter, stars, end_cb, cancel_cb))
+        self.assertIsNone(self.task_pool._map(group_name, n, func, arg_iter, stars, end_cb, cancel_cb))
         mock__check_start.assert_called_once_with(function=func)
         mock_reg_cls.assert_called_once_with()
         self.task_pool._task_groups[group_name] = mock_group_reg
-        mock_group_reg.__aenter__.assert_awaited_once_with()
         mock__arg_consumer.assert_called_once_with(group_name, n, func, arg_iter, stars,
                                                    end_callback=end_cb, cancel_callback=cancel_cb)
         mock_create_task.assert_called_once_with(fake_consumer)
         self.assertSetEqual({fake_task}, self.task_pool._group_meta_tasks_running[group_name])
-        mock_group_reg.__aexit__.assert_awaited_once()
 
     @patch.object(pool.TaskPool, '_map')
     @patch.object(pool.TaskPool, '_generate_group_name')
-    async def test_map(self, mock__generate_group_name: MagicMock, mock__map: AsyncMock):
+    def test_map(self, mock__generate_group_name: MagicMock, mock__map: MagicMock):
         mock__generate_group_name.return_value = generated_name = 'name 1 2 3'
         mock_func = MagicMock()
         arg_iter, num_concurrent, group_name = (FOO, BAR, 1, 2, 3), 2, FOO + BAR
         end_cb, cancel_cb = MagicMock(), MagicMock()
-        output = await self.task_pool.map(mock_func, arg_iter, num_concurrent, group_name, end_cb, cancel_cb)
+        output = self.task_pool.map(mock_func, arg_iter, num_concurrent, group_name, end_cb, cancel_cb)
         self.assertEqual(group_name, output)
-        mock__map.assert_awaited_once_with(group_name, num_concurrent, mock_func, arg_iter, 0,
-                                           end_callback=end_cb, cancel_callback=cancel_cb)
+        mock__map.assert_called_once_with(group_name, num_concurrent, mock_func, arg_iter, 0,
+                                          end_callback=end_cb, cancel_callback=cancel_cb)
         mock__generate_group_name.assert_not_called()
 
         mock__map.reset_mock()
-        output = await self.task_pool.map(mock_func, arg_iter, num_concurrent, None, end_cb, cancel_cb)
+        output = self.task_pool.map(mock_func, arg_iter, num_concurrent, None, end_cb, cancel_cb)
         self.assertEqual(generated_name, output)
-        mock__map.assert_awaited_once_with(generated_name, num_concurrent, mock_func, arg_iter, 0,
-                                           end_callback=end_cb, cancel_callback=cancel_cb)
+        mock__map.assert_called_once_with(generated_name, num_concurrent, mock_func, arg_iter, 0,
+                                          end_callback=end_cb, cancel_callback=cancel_cb)
         mock__generate_group_name.assert_called_once_with('map', mock_func)
 
     @patch.object(pool.TaskPool, '_map')
     @patch.object(pool.TaskPool, '_generate_group_name')
-    async def test_starmap(self, mock__generate_group_name: MagicMock, mock__map: AsyncMock):
+    def test_starmap(self, mock__generate_group_name: MagicMock, mock__map: MagicMock):
         mock__generate_group_name.return_value = generated_name = 'name 1 2 3'
         mock_func = MagicMock()
         args_iter, num_concurrent, group_name = ([FOO], [BAR]), 2, FOO + BAR
         end_cb, cancel_cb = MagicMock(), MagicMock()
-        output = await self.task_pool.starmap(mock_func, args_iter, num_concurrent, group_name, end_cb, cancel_cb)
+        output = self.task_pool.starmap(mock_func, args_iter, num_concurrent, group_name, end_cb, cancel_cb)
         self.assertEqual(group_name, output)
-        mock__map.assert_awaited_once_with(group_name, num_concurrent, mock_func, args_iter, 1,
-                                           end_callback=end_cb, cancel_callback=cancel_cb)
+        mock__map.assert_called_once_with(group_name, num_concurrent, mock_func, args_iter, 1,
+                                          end_callback=end_cb, cancel_callback=cancel_cb)
         mock__generate_group_name.assert_not_called()
 
         mock__map.reset_mock()
-        output = await self.task_pool.starmap(mock_func, args_iter, num_concurrent, None, end_cb, cancel_cb)
+        output = self.task_pool.starmap(mock_func, args_iter, num_concurrent, None, end_cb, cancel_cb)
         self.assertEqual(generated_name, output)
-        mock__map.assert_awaited_once_with(generated_name, num_concurrent, mock_func, args_iter, 1,
-                                           end_callback=end_cb, cancel_callback=cancel_cb)
+        mock__map.assert_called_once_with(generated_name, num_concurrent, mock_func, args_iter, 1,
+                                          end_callback=end_cb, cancel_callback=cancel_cb)
         mock__generate_group_name.assert_called_once_with('starmap', mock_func)
 
     @patch.object(pool.TaskPool, '_map')
     @patch.object(pool.TaskPool, '_generate_group_name')
-    async def test_doublestarmap(self, mock__generate_group_name: MagicMock, mock__map: AsyncMock):
+    async def test_doublestarmap(self, mock__generate_group_name: MagicMock, mock__map: MagicMock):
         mock__generate_group_name.return_value = generated_name = 'name 1 2 3'
         mock_func = MagicMock()
         kw_iter, num_concurrent, group_name = [{'a': FOO}, {'a': BAR}], 2, FOO + BAR
         end_cb, cancel_cb = MagicMock(), MagicMock()
-        output = await self.task_pool.doublestarmap(mock_func, kw_iter, num_concurrent, group_name, end_cb, cancel_cb)
+        output = self.task_pool.doublestarmap(mock_func, kw_iter, num_concurrent, group_name, end_cb, cancel_cb)
         self.assertEqual(group_name, output)
-        mock__map.assert_awaited_once_with(group_name, num_concurrent, mock_func, kw_iter, 2,
-                                           end_callback=end_cb, cancel_callback=cancel_cb)
+        mock__map.assert_called_once_with(group_name, num_concurrent, mock_func, kw_iter, 2,
+                                          end_callback=end_cb, cancel_callback=cancel_cb)
         mock__generate_group_name.assert_not_called()
 
         mock__map.reset_mock()
-        output = await self.task_pool.doublestarmap(mock_func, kw_iter, num_concurrent, None, end_cb, cancel_cb)
+        output = self.task_pool.doublestarmap(mock_func, kw_iter, num_concurrent, None, end_cb, cancel_cb)
         self.assertEqual(generated_name, output)
-        mock__map.assert_awaited_once_with(generated_name, num_concurrent, mock_func, kw_iter, 2,
-                                           end_callback=end_cb, cancel_callback=cancel_cb)
+        mock__map.assert_called_once_with(generated_name, num_concurrent, mock_func, kw_iter, 2,
+                                          end_callback=end_cb, cancel_callback=cancel_cb)
         mock__generate_group_name.assert_called_once_with('doublestarmap', mock_func)
 
 

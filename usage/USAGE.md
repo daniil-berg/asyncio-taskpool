@@ -122,7 +122,7 @@ async def main() -> None:
     pool = TaskPool(3)
     # Queue up two tasks (IDs 0 and 1) to run concurrently (with the same keyword-arguments).
     print("> Called `apply`")
-    await pool.apply(work, kwargs={'start': 100, 'stop': 200, 'step': 10}, num=2)
+    pool.apply(work, kwargs={'start': 100, 'stop': 200, 'step': 10}, num=2)
     # Let the tasks work for a bit.
     await asyncio.sleep(1.5)
     # Now, let us enqueue four more tasks (which will receive IDs 2, 3, 4, and 5), each created with different 
@@ -134,7 +134,7 @@ async def main() -> None:
     # Once there is room in the pool again, the third and fourth will each start (with IDs 4 and 5)
     # only once there is room in the pool and no more than one other task of these new ones is running.
     args_list = [(0, 10), (10, 20), (20, 30), (30, 40)]
-    await pool.starmap(other_work, args_list, num_concurrent=2)
+    pool.starmap(other_work, args_list, num_concurrent=2)
     print("> Called `starmap`")
     # We block, until all tasks have ended.
     print("> Calling `gather_and_close`...")
