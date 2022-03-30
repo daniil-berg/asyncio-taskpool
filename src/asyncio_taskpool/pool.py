@@ -607,6 +607,7 @@ class TaskPool(BaseTaskPool):
         Raises:
             `PoolStillUnlocked`: The pool has not been locked yet.
         """
+        self.lock()
         not_cancelled_meta_tasks = (task for task_set in self._group_meta_tasks_running.values() for task in task_set)
         with suppress(CancelledError):
             await gather(*self._meta_tasks_cancelled, *not_cancelled_meta_tasks, return_exceptions=return_exceptions)
