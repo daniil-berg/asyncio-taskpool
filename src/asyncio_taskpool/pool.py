@@ -623,12 +623,13 @@ class TaskPool(BaseTaskPool):
             coroutine_function: The function representing the task group.
 
         Returns:
-            The constructed 'prefix_function_index' string to name a task group.
+            The constructed '{prefix}-{name}-group-{idx}' string to name a task group.
+            (With `name` being the name of the `coroutine_function` and `idx` being an incrementing index.)
         """
-        base_name = f'{prefix}_{coroutine_function.__name__}'
+        base_name = f'{prefix}-{coroutine_function.__name__}-group'
         i = 0
         while True:
-            name = f'{base_name}_{i}'
+            name = f'{base_name}-{i}'
             if name not in self._task_groups.keys():
                 return name
             i += 1
@@ -687,8 +688,9 @@ class TaskPool(BaseTaskPool):
             num (optional):
                 The number of tasks to spawn with the specified parameters.
             group_name (optional):
-                Name of the task group to add the new tasks to. By default, a unique name is constructed using the
-                name of the provided `func` and an incrementing index as 'apply_func_index'.
+                Name of the task group to add the new tasks to. By default, a unique name is constructed in the form
+                :code:`'apply-{name}-group-{idx}'` (with `name` being the name of the `func` and `idx` being an
+                incrementing index).
             end_callback (optional):
                 A callback to execute after a task has ended.
                 It is run with the task's ID as its only positional argument.
@@ -697,7 +699,7 @@ class TaskPool(BaseTaskPool):
                 It is run with the task's ID as its only positional argument.
 
         Returns:
-            The name of the newly created task group (see the `group_name` parameter).
+            The name of the newly created group (see the `group_name` parameter).
 
         Raises:
             `PoolIsClosed`: The pool is closed.
@@ -853,8 +855,8 @@ class TaskPool(BaseTaskPool):
                 The number new tasks spawned by this method to run concurrently. Defaults to 1.
             group_name (optional):
                 Name of the task group to add the new tasks to. If provided, it must be a name that doesn't exist yet.
-                By default, a unique name is constructed using the name of the provided `func` and an incrementing
-                index as 'apply_func_index'.
+                By default, a unique name is constructed in the form :code:`'map-{name}-group-{idx}'`
+                (with `name` being the name of the `func` and `idx` being an incrementing index).
             end_callback (optional):
                 A callback to execute after a task has ended.
                 It is run with the task's ID as its only positional argument.
@@ -863,7 +865,7 @@ class TaskPool(BaseTaskPool):
                 It is run with the task's ID as its only positional argument.
 
         Returns:
-            The name of the newly created task group (see the `group_name` parameter).
+            The name of the newly created group (see the `group_name` parameter).
 
         Raises:
             `PoolIsClosed`: The pool is closed.
@@ -884,6 +886,10 @@ class TaskPool(BaseTaskPool):
         Like :meth:`map` except that the elements of `args_iter` are expected to be iterables themselves to be unpacked
         as positional arguments to the function.
         Each coroutine then looks like `func(*args)`, `args` being an element from `args_iter`.
+
+        Returns:
+            The name of the newly created group in the form :code:`'starmap-{name}-group-{index}'`
+            (with `name` being the name of the `func` and `idx` being an incrementing index).
         """
         if group_name is None:
             group_name = self._generate_group_name('starmap', func)
@@ -898,6 +904,10 @@ class TaskPool(BaseTaskPool):
         Like :meth:`map` except that the elements of `kwargs_iter` are expected to be iterables themselves to be
         unpacked as keyword-arguments to the function.
         Each coroutine then looks like `func(**kwargs)`, `kwargs` being an element from `kwargs_iter`.
+
+        Returns:
+            The name of the newly created group in the form :code:`'doublestarmap-{name}-group-{index}'`
+            (with `name` being the name of the `func` and `idx` being an incrementing index).
         """
         if group_name is None:
             group_name = self._generate_group_name('doublestarmap', func)
@@ -957,6 +967,7 @@ class SimpleTaskPool(BaseTaskPool):
         self._kwargs: KwArgsT = kwargs if kwargs is not None else {}
         self._end_callback: EndCB = end_callback
         self._cancel_callback: CancelCB = cancel_callback
+        self._start_calls: int = 0
         super().__init__(pool_size=pool_size, name=name)
 
     @property
@@ -964,14 +975,14 @@ class SimpleTaskPool(BaseTaskPool):
         """Name of the coroutine function used in the pool."""
         return self._func.__name__
 
-    async def _start_one(self) -> int:
+    async def _start_one(self, group_name: str) -> int:
         """Starts a single new task within the pool and returns its ID."""
-        return await self._start_task(self._func(*self._args, **self._kwargs),
+        return await self._start_task(self._func(*self._args, **self._kwargs), group_name=group_name,
                                       end_callback=self._end_callback, cancel_callback=self._cancel_callback)
 
-    async def start(self, num: int) -> List[int]:
+    async def start(self, num: int) -> str:
         """
-        Starts specified number of new tasks in the pool and returns their IDs.
+        Starts specified number of new tasks in the pool as a new group.
 
         This method may block if there is less room in the pool than the desired number of new tasks.
 
@@ -979,11 +990,13 @@ class SimpleTaskPool(BaseTaskPool):
             num: The number of new tasks to start.
 
         Returns:
-            List of IDs of the new tasks that have been started (not necessarily in the order they were started).
+            The name of the newly created task group in the form :code:`'start-group-{idx}'`
+            (with `idx` being an incrementing index).
         """
-        ids = await gather(*(self._start_one() for _ in range(num)))
-        assert isinstance(ids, list)  # for PyCharm
-        return ids
+        group_name = f'start-group-{self._start_calls}'
+        self._start_calls += 1
+        await gather(*(self._start_one(group_name) for _ in range(num)))
+        return group_name
 
     def stop(self, num: int) -> List[int]:
         """

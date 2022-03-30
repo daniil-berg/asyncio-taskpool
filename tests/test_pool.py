@@ -476,12 +476,13 @@ class TaskPoolTestCase(CommonTestCase):
 
     def test__generate_group_name(self):
         prefix, func = 'x y z', AsyncMock(__name__=BAR)
+        base_name = f'{prefix}-{BAR}-group'
         self.task_pool._task_groups = {
-            f'{prefix}_{BAR}_0': MagicMock(),
-            f'{prefix}_{BAR}_1': MagicMock(),
-            f'{prefix}_{BAR}_100': MagicMock(),
+            f'{base_name}-0': MagicMock(),
+            f'{base_name}-1': MagicMock(),
+            f'{base_name}-100': MagicMock(),
         }
-        expected_output = f'{prefix}_{BAR}_2'
+        expected_output = f'{base_name}-2'
         output = self.task_pool._generate_group_name(prefix, func)
         self.assertEqual(expected_output, output)
 
@@ -751,20 +752,22 @@ class SimpleTaskPoolTestCase(CommonTestCase):
     async def test__start_one(self, mock__start_task: AsyncMock):
         mock__start_task.return_value = expected_output = 99
         self.task_pool._func = MagicMock(return_value=BAR)
-        output = await self.task_pool._start_one()
+        group_name = FOO + BAR + 'abc'
+        output = await self.task_pool._start_one(group_name)
         self.assertEqual(expected_output, output)
         self.task_pool._func.assert_called_once_with(*self.task_pool._args, **self.task_pool._kwargs)
-        mock__start_task.assert_awaited_once_with(BAR, end_callback=self.task_pool._end_callback,
+        mock__start_task.assert_awaited_once_with(BAR, group_name=group_name, end_callback=self.task_pool._end_callback,
                                                   cancel_callback=self.task_pool._cancel_callback)
 
     @patch.object(pool.SimpleTaskPool, '_start_one')
     async def test_start(self, mock__start_one: AsyncMock):
         mock__start_one.return_value = FOO
         num = 5
+        self.task_pool._start_calls = 42
         output = await self.task_pool.start(num)
-        expected_output = num * [FOO]
-        self.assertListEqual(expected_output, output)
-        mock__start_one.assert_has_awaits(num * [call()])
+        expected_output = 'start-group-42'
+        self.assertEqual(expected_output, output)
+        mock__start_one.assert_has_awaits(num * [call(expected_output)])
 
     @patch.object(pool.SimpleTaskPool, 'cancel')
     def test_stop(self, mock_cancel: MagicMock):

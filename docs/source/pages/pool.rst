@@ -162,7 +162,7 @@ Let's take the :ref:`queue worker example <queue-worker-function>` from before. 
    :caption: main.py
 
    from asyncio_taskpool import SimpleTaskPool
-   from .work import another_worker_function
+   from .work import queue_worker_function
 
 
    async def main():
@@ -193,9 +193,9 @@ This may, at first glance, not seem like much of a difference, aside from differ
           if some_condition and pool.num_running > 10:
               pool.stop(3)
           elif some_other_condition and pool.num_running < 5:
-              pool.start(5)
+              await pool.start(5)
           else:
-              pool.start(1)
+              await pool.start(1)
           ...
        await pool.gather_and_close()
 

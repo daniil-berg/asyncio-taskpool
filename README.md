@@ -27,15 +27,8 @@ Generally speaking, a task is added to a pool by providing it with a coroutine f
 
 ```python
 from asyncio_taskpool import SimpleTaskPool
-
 ...
-
-
 async def work(_foo, _bar): ...
-
-
-...
-
 
 async def main():
     pool = SimpleTaskPool(work, args=('xyz', 420))
@@ -44,7 +37,6 @@ async def main():
     pool.stop(3)
     ...
     await pool.gather_and_close()
-    ...
 ```
 
 Since one of the main goals of `asyncio-taskpool` is to be able to start/stop tasks dynamically or "on-the-fly", _most_ of the associated methods are non-blocking _most_ of the time. A notable exception is the `gather_and_close` method for awaiting the return of all tasks in the pool. (It is essentially a glorified wrapper around the [`asyncio.gather`](https://docs.python.org/3/library/asyncio-task.html#asyncio.gather) function.)
