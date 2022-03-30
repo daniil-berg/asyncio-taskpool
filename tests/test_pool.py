@@ -20,13 +20,11 @@ Unittests for the `asyncio_taskpool.pool` module.
 
 from asyncio.exceptions import CancelledError
 from asyncio.locks import Semaphore
-from datetime import datetime
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import PropertyMock, MagicMock, AsyncMock, patch, call
 from typing import Type
 
 from asyncio_taskpool import pool, exceptions
-from asyncio_taskpool.internals.constants import DATETIME_FORMAT
 
 
 EMPTY_LIST, EMPTY_DICT, EMPTY_SET = [], {}, set()
@@ -363,7 +361,8 @@ class BaseTaskPoolTestCase(CommonTestCase):
         self.assertDictEqual(EMPTY_DICT, self.task_pool._tasks_ended)
         self.assertDictEqual(EMPTY_DICT, self.task_pool._tasks_cancelled)
 
-    async def test_gather_and_close(self):
+    @patch.object(pool.BaseTaskPool, 'lock')
+    async def test_gather_and_close(self, mock_lock: MagicMock):
         mock_running_func = AsyncMock()
         mock_ended_func, mock_cancelled_func = AsyncMock(), AsyncMock(side_effect=Exception)
         self.task_pool._tasks_ended = {123: mock_ended_func()}
@@ -372,6 +371,7 @@ class BaseTaskPoolTestCase(CommonTestCase):
 
         self.task_pool._locked = True
         self.assertIsNone(await self.task_pool.gather_and_close(return_exceptions=True))
+        mock_lock.assert_called_once_with()
         mock_ended_func.assert_awaited_once_with()
         mock_cancelled_func.assert_awaited_once_with()
         mock_running_func.assert_awaited_once_with()
@@ -458,13 +458,15 @@ class TaskPoolTestCase(CommonTestCase):
         mock_cancelled_meta_task.assert_awaited_once_with()
         self.assertSetEqual(EMPTY_SET, self.task_pool._meta_tasks_cancelled)
 
+    @patch.object(pool.BaseTaskPool, 'lock')
     @patch.object(pool.BaseTaskPool, 'gather_and_close')
-    async def test_gather_and_close(self, mock_base_gather_and_close: AsyncMock):
+    async def test_gather_and_close(self, mock_base_gather_and_close: AsyncMock, mock_lock: MagicMock):
         mock_meta_task1, mock_meta_task2 = AsyncMock(), AsyncMock()
         self.task_pool._group_meta_tasks_running = {FOO: {mock_meta_task1()}, BAR: {mock_meta_task2()}}
         mock_cancelled_meta_task = AsyncMock(side_effect=CancelledError)
         self.task_pool._meta_tasks_cancelled = {mock_cancelled_meta_task()}
         self.assertIsNone(await self.task_pool.gather_and_close(return_exceptions=True))
+        mock_lock.assert_called_once_with()
         mock_base_gather_and_close.assert_awaited_once_with(return_exceptions=True)
         mock_meta_task1.assert_awaited_once_with()
         mock_meta_task2.assert_awaited_once_with()
@@ -472,13 +474,15 @@ class TaskPoolTestCase(CommonTestCase):
         self.assertDictEqual(EMPTY_DICT, self.task_pool._group_meta_tasks_running)
         self.assertSetEqual(EMPTY_SET, self.task_pool._meta_tasks_cancelled)
 
-    @patch.object(pool, 'datetime')
-    def test__generate_group_name(self, mock_datetime: MagicMock):
+    def test__generate_group_name(self):
         prefix, func = 'x y z', AsyncMock(__name__=BAR)
-        dt = datetime(1776, 7, 4, 0, 0, 1)
-        mock_datetime.now = MagicMock(return_value=dt)
-        expected_output = f'{prefix}_{BAR}_{dt.strftime(DATETIME_FORMAT)}'
-        output = pool.TaskPool._generate_group_name(prefix, func)
+        self.task_pool._task_groups = {
+            f'{prefix}_{BAR}_0': MagicMock(),
+            f'{prefix}_{BAR}_1': MagicMock(),
+            f'{prefix}_{BAR}_100': MagicMock(),
+        }
+        expected_output = f'{prefix}_{BAR}_2'
+        output = self.task_pool._generate_group_name(prefix, func)
         self.assertEqual(expected_output, output)
 
     @patch.object(pool.TaskPool, '_start_task')

@@ -25,8 +25,6 @@ PACKAGE_NAME = 'asyncio_taskpool'
 
 DEFAULT_TASK_GROUP = 'default'
 
-DATETIME_FORMAT = '%Y-%m-%d_%H-%M-%S'
-
 SESSION_MSG_BYTES = 1024 * 100
 
 STREAM_WRITER = 'stream_writer'

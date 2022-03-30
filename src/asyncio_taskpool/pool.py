@@ -33,12 +33,11 @@ from asyncio.exceptions import CancelledError
 from asyncio.locks import Semaphore
 from asyncio.tasks import Task, create_task, gather
 from contextlib import suppress
-from datetime import datetime
 from math import inf
 from typing import Any, Awaitable, Dict, Iterable, List, Set, Union
 
 from . import exceptions
-from .internals.constants import DEFAULT_TASK_GROUP, DATETIME_FORMAT
+from .internals.constants import DEFAULT_TASK_GROUP
 from .internals.group_register import TaskGroupRegister
 from .internals.helpers import execute_optional, star_function
 from .internals.types import ArgsT, KwArgsT, CoroutineFunc, EndCB, CancelCB
@@ -615,19 +614,24 @@ class TaskPool(BaseTaskPool):
         self._group_meta_tasks_running.clear()
         await super().gather_and_close(return_exceptions=return_exceptions)
 
-    @staticmethod
-    def _generate_group_name(prefix: str, coroutine_function: CoroutineFunc) -> str:
+    def _generate_group_name(self, prefix: str, coroutine_function: CoroutineFunc) -> str:
         """
-        Creates a task group identifier that includes the current datetime.
+        Creates a unique task group identifier.
 
         Args:
             prefix: The start of the name; will be followed by an underscore.
             coroutine_function: The function representing the task group.
 
         Returns:
-            The constructed 'prefix_function_datetime' string to name a task group.
+            The constructed 'prefix_function_index' string to name a task group.
         """
-        return f'{prefix}_{coroutine_function.__name__}_{datetime.now().strftime(DATETIME_FORMAT)}'
+        base_name = f'{prefix}_{coroutine_function.__name__}'
+        i = 0
+        while True:
+            name = f'{base_name}_{i}'
+            if name not in self._task_groups.keys():
+                return name
+            i += 1
 
     async def _apply_num(self, group_name: str, func: CoroutineFunc, args: ArgsT = (), kwargs: KwArgsT = None,
                          num: int = 1, end_callback: EndCB = None, cancel_callback: CancelCB = None) -> None:
@@ -683,7 +687,8 @@ class TaskPool(BaseTaskPool):
             num (optional):
                 The number of tasks to spawn with the specified parameters.
             group_name (optional):
-                Name of the task group to add the new tasks to.
+                Name of the task group to add the new tasks to. By default, a unique name is constructed using the
+                name of the provided `func` and an incrementing index as 'apply_func_index'.
             end_callback (optional):
                 A callback to execute after a task has ended.
                 It is run with the task's ID as its only positional argument.
@@ -692,7 +697,7 @@ class TaskPool(BaseTaskPool):
                 It is run with the task's ID as its only positional argument.
 
         Returns:
-            The name of the task group that the newly spawned tasks have been added to.
+            The name of the newly created task group (see the `group_name` parameter).
 
         Raises:
             `PoolIsClosed`: The pool is closed.
@@ -711,7 +716,7 @@ class TaskPool(BaseTaskPool):
 
     @staticmethod
     def _get_map_end_callback(map_semaphore: Semaphore, actual_end_callback: EndCB) -> EndCB:
-        """Returns a wrapped `end_callback` for each :meth:`_queue_consumer` task that releases the `map_semaphore`."""
+        """Returns a wrapped `end_callback` for each :meth:`_arg_consumer` task that releases the `map_semaphore`."""
         async def release_callback(task_id: int) -> None:
             map_semaphore.release()
             await execute_optional(actual_end_callback, args=(task_id,))
@@ -848,6 +853,8 @@ class TaskPool(BaseTaskPool):
                 The number new tasks spawned by this method to run concurrently. Defaults to 1.
             group_name (optional):
                 Name of the task group to add the new tasks to. If provided, it must be a name that doesn't exist yet.
+                By default, a unique name is constructed using the name of the provided `func` and an incrementing
+                index as 'apply_func_index'.
             end_callback (optional):
                 A callback to execute after a task has ended.
                 It is run with the task's ID as its only positional argument.
@@ -856,7 +863,7 @@ class TaskPool(BaseTaskPool):
                 It is run with the task's ID as its only positional argument.
 
         Returns:
-            The name of the task group that the newly spawned tasks will be added to.
+            The name of the newly created task group (see the `group_name` parameter).
 
         Raises:
             `PoolIsClosed`: The pool is closed.
