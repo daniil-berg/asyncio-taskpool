@@ -83,6 +83,10 @@ class BaseTaskPool:
         self._enough_room: Semaphore = Semaphore()
         self._task_groups: Dict[str, TaskGroupRegister[int]] = {}
 
+        # Mapping task group names to sets of meta tasks, and a bucket for cancelled meta tasks.
+        self._group_meta_tasks_running: Dict[str, Set[Task]] = {}
+        self._meta_tasks_cancelled: Set[Task] = set()
+
         # Finish with method/functions calls that add the pool to the internal list of pools, set its initial size,
         # and issue a log message.
         self._idx: int = self._add_pool(self)
@@ -375,6 +379,17 @@ class BaseTaskPool:
         for task in tasks:
             task.cancel(msg=msg)
 
+    def _cancel_group_meta_tasks(self, group_name: str) -> None:
+        """Cancels and forgets all meta tasks associated with the task group named `group_name`."""
+        try:
+            meta_tasks = self._group_meta_tasks_running.pop(group_name)
+        except KeyError:
+            return
+        for meta_task in meta_tasks:
+            meta_task.cancel()
+        self._meta_tasks_cancelled.update(meta_tasks)
+        log.debug("%s cancelled and forgot meta tasks from group %s", str(self), group_name)
+
     def _cancel_and_remove_all_from_group(self, group_name: str, group_reg: TaskGroupRegister, msg: str = None) -> None:
         """
         Removes all tasks from the specified group and cancels them.
@@ -386,6 +401,7 @@ class BaseTaskPool:
             group_reg: The task group register object containing the task IDs.
             msg (optional): Passed to the `Task.cancel()` method of every task specified by the `task_ids`.
         """
+        self._cancel_group_meta_tasks(group_name)
         while group_reg:
             try:
                 self._tasks_running[group_reg.pop()].cancel(msg=msg)
@@ -399,12 +415,16 @@ class BaseTaskPool:
 
         The task group is subsequently forgotten by the pool.
 
+        If any methods such launched meta tasks belonging to that group, these meta tasks are cancelled before the
+        actual tasks are cancelled. This means that any tasks "queued" to be started by a meta task will
+        **never even start**.
+
         Args:
-            group_name: The name of the group of tasks that shall be cancelled.
-            msg (optional): Passed to the `Task.cancel()` method of every task specified by the `task_ids`.
+            group_name: The name of the group of tasks (and meta tasks) that shall be cancelled.
+            msg (optional): Passed to the `Task.cancel()` method of every task in the group.
 
         Raises:
-            `InvalidGroupName`: if no task group named `group_name` exists in the pool.
+            `InvalidGroupName`: No task group named `group_name` exists in the pool.
         """
         log.debug("%s cancelling tasks in group %s", str(self), group_name)
         try:
@@ -417,130 +437,20 @@ class BaseTaskPool:
 
     async def cancel_all(self, msg: str = None) -> None:
         """
-        Cancels all tasks still running within the pool.
+        Cancels all tasks still running within the pool (including meta tasks).
+
+        If any methods such launched meta tasks belonging to that group, these meta tasks are cancelled before the
+        actual tasks are cancelled. This means that any tasks "queued" to be started by a meta task will
+        **never even start**.
 
         Args:
-            msg (optional): Passed to the `Task.cancel()` method of every task specified by the `task_ids`.
+            msg (optional): Passed to the `Task.cancel()` method of every task.
         """
         log.warning("%s cancelling all tasks!", str(self))
         while self._task_groups:
             group_name, group_reg = self._task_groups.popitem()
             async with group_reg:
                 self._cancel_and_remove_all_from_group(group_name, group_reg, msg=msg)
-
-    async def flush(self, return_exceptions: bool = False):
-        """
-        Gathers (i.e. awaits) all ended/cancelled tasks in the pool.
-
-        The tasks are subsequently forgotten by the pool. This method exists mainly to free up memory of unneeded
-        `Task` objects.
-
-        It blocks, **only if** any of the tasks block while catching a `asyncio.CancelledError` or any of the callbacks
-        registered for the tasks block.
-
-        Args:
-            return_exceptions (optional): Passed directly into `gather`.
-        """
-        await gather(*self._tasks_ended.values(), *self._tasks_cancelled.values(), return_exceptions=return_exceptions)
-        self._tasks_ended.clear()
-        self._tasks_cancelled.clear()
-
-    async def gather_and_close(self, return_exceptions: bool = False):
-        """
-        Gathers (i.e. awaits) **all** tasks in the pool, then closes it.
-
-        Once this method is called, no more tasks can be started in the pool.
-
-        This method may block, if one of the tasks blocks while catching a `asyncio.CancelledError` or if any of the
-        callbacks registered for a task blocks for whatever reason.
-
-        Args:
-            return_exceptions (optional): Passed directly into `gather`.
-
-        Raises:
-            `PoolStillUnlocked`: The pool has not been locked yet.
-        """
-        self.lock()
-        await gather(*self._tasks_ended.values(), *self._tasks_cancelled.values(), *self._tasks_running.values(),
-                     return_exceptions=return_exceptions)
-        self._tasks_ended.clear()
-        self._tasks_cancelled.clear()
-        self._tasks_running.clear()
-        self._closed = True
-
-
-class TaskPool(BaseTaskPool):
-    """
-    General purpose task pool class.
-
-    Attempts to emulate part of the interface of `multiprocessing.pool.Pool` from the stdlib.
-
-    A `TaskPool` instance can manage an arbitrary number of concurrent tasks from any coroutine function.
-    Tasks in the pool can all belong to the same coroutine function,
-    but they can also come from any number of different and unrelated coroutine functions.
-
-    As long as there is room in the pool, more tasks can be added. (By default, there is no pool size limit.)
-    Each task started in the pool receives a unique ID, which can be used to cancel specific tasks at any moment.
-
-    Adding tasks blocks **only if** the pool is full at that moment.
-    """
-
-    def __init__(self, pool_size: int = inf, name: str = None) -> None:
-        super().__init__(pool_size=pool_size, name=name)
-        # In addition to all the attributes of the base class, we need a dictionary mapping task group names to sets of
-        # meta tasks that are/were running in the context of that group, and a bucket for cancelled meta tasks.
-        self._group_meta_tasks_running: Dict[str, Set[Task]] = {}
-        self._meta_tasks_cancelled: Set[Task] = set()
-
-    def _cancel_group_meta_tasks(self, group_name: str) -> None:
-        """Cancels and forgets all meta tasks associated with the task group named `group_name`."""
-        try:
-            meta_tasks = self._group_meta_tasks_running.pop(group_name)
-        except KeyError:
-            return
-        for meta_task in meta_tasks:
-            meta_task.cancel()
-        self._meta_tasks_cancelled.update(meta_tasks)
-        log.debug("%s cancelled and forgot meta tasks from group %s", str(self), group_name)
-
-    def _cancel_and_remove_all_from_group(self, group_name: str, group_reg: TaskGroupRegister, msg: str = None) -> None:
-        """See base class."""
-        self._cancel_group_meta_tasks(group_name)
-        super()._cancel_and_remove_all_from_group(group_name, group_reg, msg=msg)
-
-    async def cancel_group(self, group_name: str, msg: str = None) -> None:
-        """
-        Cancels an entire group of tasks.
-
-        The task group is subsequently forgotten by the pool.
-
-        If any methods such as :meth:`map` launched meta tasks belonging to that group, these meta tasks are cancelled
-        before the actual tasks are cancelled. This means that any tasks "queued" to be started by a meta task will
-        **never even start**. In the case of :meth:`map` this would mean that its `arg_iter` may be abandoned before it
-        was fully consumed (if that is even possible).
-
-        Args:
-            group_name: The name of the group of tasks (and meta tasks) that shall be cancelled.
-            msg (optional): Passed to the `Task.cancel()` method of every task specified by the `task_ids`.
-
-        Raises:
-            `InvalidGroupName`: No task group named `group_name` exists in the pool.
-        """
-        await super().cancel_group(group_name=group_name, msg=msg)
-
-    async def cancel_all(self, msg: str = None) -> None:
-        """
-        Cancels all tasks still running within the pool (including meta tasks).
-
-        If any methods such as :meth:`map` launched meta tasks, these meta tasks are cancelled before the actual tasks
-        are cancelled. This means that any tasks "queued" to be started by a meta task will **never even start**. In the
-        case of :meth:`map` this would mean that its `arg_iter` may be abandoned before it was fully consumed (if that
-        is even possible).
-
-        Args:
-            msg (optional): Passed to the `Task.cancel()` method of every task specified by the `task_ids`.
-        """
-        await super().cancel_all(msg=msg)
 
     def _pop_ended_meta_tasks(self) -> Set[Task]:
         """
@@ -573,7 +483,7 @@ class TaskPool(BaseTaskPool):
         Gathers (i.e. awaits) all ended/cancelled tasks in the pool.
 
         The tasks are subsequently forgotten by the pool. This method exists mainly to free up memory of unneeded
-        `Task` objects. It also gets rid of unneeded meta tasks.
+        `Task` objects. It also gets rid of unneeded (ended/cancelled) meta tasks.
 
         It blocks, **only if** any of the tasks block while catching a `asyncio.CancelledError` or any of the callbacks
         registered for the tasks block.
@@ -585,7 +495,9 @@ class TaskPool(BaseTaskPool):
             await gather(*self._meta_tasks_cancelled, *self._pop_ended_meta_tasks(),
                          return_exceptions=return_exceptions)
         self._meta_tasks_cancelled.clear()
-        await super().flush(return_exceptions=return_exceptions)
+        await gather(*self._tasks_ended.values(), *self._tasks_cancelled.values(), return_exceptions=return_exceptions)
+        self._tasks_ended.clear()
+        self._tasks_cancelled.clear()
 
     async def gather_and_close(self, return_exceptions: bool = False):
         """
@@ -594,8 +506,8 @@ class TaskPool(BaseTaskPool):
         Once this method is called, no more tasks can be started in the pool.
 
         Note that this method may block indefinitely as long as any task in the pool is not done. This includes meta
-        tasks launched by methods such as :meth:`map`, which end by themselves, only once the arguments iterator is
-        fully consumed (which may not even be possible). To avoid this, make sure to call :meth:`cancel_all` first.
+        tasks launched by other methods, which may or may not even end by themselves. To avoid this, make sure to call
+        :meth:`cancel_all` first.
 
         This method may also block, if one of the tasks blocks while catching a `asyncio.CancelledError` or if any of
         the callbacks registered for a task blocks for whatever reason.
@@ -612,7 +524,29 @@ class TaskPool(BaseTaskPool):
             await gather(*self._meta_tasks_cancelled, *not_cancelled_meta_tasks, return_exceptions=return_exceptions)
         self._meta_tasks_cancelled.clear()
         self._group_meta_tasks_running.clear()
-        await super().gather_and_close(return_exceptions=return_exceptions)
+        await gather(*self._tasks_ended.values(), *self._tasks_cancelled.values(), *self._tasks_running.values(),
+                     return_exceptions=return_exceptions)
+        self._tasks_ended.clear()
+        self._tasks_cancelled.clear()
+        self._tasks_running.clear()
+        self._closed = True
+
+
+class TaskPool(BaseTaskPool):
+    """
+    General purpose task pool class.
+
+    Attempts to emulate part of the interface of `multiprocessing.pool.Pool` from the stdlib.
+
+    A `TaskPool` instance can manage an arbitrary number of concurrent tasks from any coroutine function.
+    Tasks in the pool can all belong to the same coroutine function,
+    but they can also come from any number of different and unrelated coroutine functions.
+
+    As long as there is room in the pool, more tasks can be added. (By default, there is no pool size limit.)
+    Each task started in the pool receives a unique ID, which can be used to cancel specific tasks at any moment.
+
+    Adding tasks blocks **only if** the pool is full at that moment.
+    """
 
     def _generate_group_name(self, prefix: str, coroutine_function: CoroutineFunc) -> str:
         """
@@ -677,6 +611,9 @@ class TaskPool(BaseTaskPool):
         Because this method delegates the spawning of the tasks to a meta task, it **never blocks**. However, just
         because this method returns immediately, this does not mean that any task was started or that any number of
         tasks will start soon, as this is solely determined by the :attr:`BaseTaskPool.pool_size` and `num`.
+
+        If the entire task group is cancelled, the meta task is cancelled first, which may cause the number of tasks
+        spawned to be less than `num`.
 
         Args:
             func:
@@ -793,6 +730,9 @@ class TaskPool(BaseTaskPool):
         because this method returns immediately, this does not mean that any task was started or that any number of
         tasks will start soon, as this is solely determined by the :attr:`BaseTaskPool.pool_size` and `num_concurrent`.
 
+        If the entire task group is cancelled, the meta task is cancelled first, which means that `arg_iter` may be
+        abandoned before being fully consumed (if that is even possible).
+
         Args:
             group_name:
                 Name of the task group to add the new tasks to. It must be a name that doesn't exist yet.
@@ -845,6 +785,9 @@ class TaskPool(BaseTaskPool):
         Because this method delegates the spawning of the tasks to a meta task, it **never blocks**. However, just
         because this method returns immediately, this does not mean that any task was started or that any number of
         tasks will start soon, as this is solely determined by the :attr:`BaseTaskPool.pool_size` and `num_concurrent`.
+
+        If the entire task group is cancelled, the meta task is cancelled first, which means that `arg_iter` may be
+        abandoned before being fully consumed (if that is even possible).
 
         Args:
             func:

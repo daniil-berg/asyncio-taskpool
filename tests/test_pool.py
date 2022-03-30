@@ -93,6 +93,9 @@ class BaseTaskPoolTestCase(CommonTestCase):
         self.assertIsInstance(self.task_pool._enough_room, Semaphore)
         self.assertDictEqual(EMPTY_DICT, self.task_pool._task_groups)
 
+        self.assertDictEqual(EMPTY_DICT, self.task_pool._group_meta_tasks_running)
+        self.assertSetEqual(EMPTY_SET, self.task_pool._meta_tasks_cancelled)
+
         self.assertEqual(self.mock_idx, self.task_pool._idx)
 
         self.mock__add_pool.assert_called_once_with(self.task_pool)
@@ -316,10 +319,31 @@ class BaseTaskPoolTestCase(CommonTestCase):
         mock__get_running_task.assert_has_calls([call(task_id1), call(task_id2), call(task_id3)])
         mock_cancel.assert_has_calls([call(msg=FOO), call(msg=FOO), call(msg=FOO)])
 
-    def test__cancel_and_remove_all_from_group(self):
+    def test__cancel_group_meta_tasks(self):
+        mock_task1, mock_task2 = MagicMock(), MagicMock()
+        self.task_pool._group_meta_tasks_running[BAR] = {mock_task1, mock_task2}
+        self.assertIsNone(self.task_pool._cancel_group_meta_tasks(FOO))
+        self.assertDictEqual({BAR: {mock_task1, mock_task2}}, self.task_pool._group_meta_tasks_running)
+        self.assertSetEqual(EMPTY_SET, self.task_pool._meta_tasks_cancelled)
+        mock_task1.cancel.assert_not_called()
+        mock_task2.cancel.assert_not_called()
+
+        self.assertIsNone(self.task_pool._cancel_group_meta_tasks(BAR))
+        self.assertDictEqual(EMPTY_DICT, self.task_pool._group_meta_tasks_running)
+        self.assertSetEqual({mock_task1, mock_task2}, self.task_pool._meta_tasks_cancelled)
+        mock_task1.cancel.assert_called_once_with()
+        mock_task2.cancel.assert_called_once_with()
+
+    @patch.object(pool.BaseTaskPool, '_cancel_group_meta_tasks')
+    def test__cancel_and_remove_all_from_group(self, mock__cancel_group_meta_tasks: MagicMock):
         task_id = 555
         mock_cancel = MagicMock()
-        self.task_pool._tasks_running[task_id] = MagicMock(cancel=mock_cancel)
+
+        def add_mock_task_to_running(_):
+            self.task_pool._tasks_running[task_id] = MagicMock(cancel=mock_cancel)
+        # We add the fake task to the `_tasks_running` dictionary as a side effect of calling the mocked method,
+        # to verify that it is called first, before the cancellation loop starts.
+        mock__cancel_group_meta_tasks.side_effect = add_mock_task_to_running
 
         class MockRegister(set, MagicMock):
             pass
@@ -351,11 +375,36 @@ class BaseTaskPoolTestCase(CommonTestCase):
         mock_grp_aenter.assert_awaited_once_with()
         mock_grp_aexit.assert_awaited_once()
 
-    async def test_flush(self):
+    def test__pop_ended_meta_tasks(self):
+        mock_task, mock_done_task1 = MagicMock(done=lambda: False), MagicMock(done=lambda: True)
+        self.task_pool._group_meta_tasks_running[FOO] = {mock_task, mock_done_task1}
+        mock_done_task2, mock_done_task3 = MagicMock(done=lambda: True), MagicMock(done=lambda: True)
+        self.task_pool._group_meta_tasks_running[BAR] = {mock_done_task2, mock_done_task3}
+        expected_output = {mock_done_task1, mock_done_task2, mock_done_task3}
+        output = self.task_pool._pop_ended_meta_tasks()
+        self.assertSetEqual(expected_output, output)
+        self.assertDictEqual({FOO: {mock_task}}, self.task_pool._group_meta_tasks_running)
+
+    @patch.object(pool.BaseTaskPool, '_pop_ended_meta_tasks')
+    async def test_flush(self, mock__pop_ended_meta_tasks: MagicMock):
+        # Meta tasks:
+        mock_ended_meta_task = AsyncMock()
+        mock__pop_ended_meta_tasks.return_value = {mock_ended_meta_task()}
+        mock_cancelled_meta_task = AsyncMock(side_effect=CancelledError)
+        self.task_pool._meta_tasks_cancelled = {mock_cancelled_meta_task()}
+        # Actual tasks:
         mock_ended_func, mock_cancelled_func = AsyncMock(), AsyncMock(side_effect=Exception)
         self.task_pool._tasks_ended = {123: mock_ended_func()}
         self.task_pool._tasks_cancelled = {456: mock_cancelled_func()}
+
         self.assertIsNone(await self.task_pool.flush(return_exceptions=True))
+
+        # Meta tasks:
+        mock__pop_ended_meta_tasks.assert_called_once_with()
+        mock_ended_meta_task.assert_awaited_once_with()
+        mock_cancelled_meta_task.assert_awaited_once_with()
+        self.assertSetEqual(EMPTY_SET, self.task_pool._meta_tasks_cancelled)
+        # Actual tasks:
         mock_ended_func.assert_awaited_once_with()
         mock_cancelled_func.assert_awaited_once_with()
         self.assertDictEqual(EMPTY_DICT, self.task_pool._tasks_ended)
@@ -363,15 +412,28 @@ class BaseTaskPoolTestCase(CommonTestCase):
 
     @patch.object(pool.BaseTaskPool, 'lock')
     async def test_gather_and_close(self, mock_lock: MagicMock):
+        # Meta tasks:
+        mock_meta_task1, mock_meta_task2 = AsyncMock(), AsyncMock()
+        self.task_pool._group_meta_tasks_running = {FOO: {mock_meta_task1()}, BAR: {mock_meta_task2()}}
+        mock_cancelled_meta_task = AsyncMock(side_effect=CancelledError)
+        self.task_pool._meta_tasks_cancelled = {mock_cancelled_meta_task()}
+        # Actual tasks:
         mock_running_func = AsyncMock()
         mock_ended_func, mock_cancelled_func = AsyncMock(), AsyncMock(side_effect=Exception)
         self.task_pool._tasks_ended = {123: mock_ended_func()}
         self.task_pool._tasks_cancelled = {456: mock_cancelled_func()}
         self.task_pool._tasks_running = {789: mock_running_func()}
 
-        self.task_pool._locked = True
         self.assertIsNone(await self.task_pool.gather_and_close(return_exceptions=True))
+
         mock_lock.assert_called_once_with()
+        # Meta tasks:
+        mock_meta_task1.assert_awaited_once_with()
+        mock_meta_task2.assert_awaited_once_with()
+        mock_cancelled_meta_task.assert_awaited_once_with()
+        self.assertDictEqual(EMPTY_DICT, self.task_pool._group_meta_tasks_running)
+        self.assertSetEqual(EMPTY_SET, self.task_pool._meta_tasks_cancelled)
+        # Actual tasks:
         mock_ended_func.assert_awaited_once_with()
         mock_cancelled_func.assert_awaited_once_with()
         mock_running_func.assert_awaited_once_with()
@@ -384,95 +446,6 @@ class BaseTaskPoolTestCase(CommonTestCase):
 class TaskPoolTestCase(CommonTestCase):
     TEST_CLASS = pool.TaskPool
     task_pool: pool.TaskPool
-
-    def setUp(self) -> None:
-        self.base_class_init_patcher = patch.object(pool.BaseTaskPool, '__init__')
-        self.base_class_init = self.base_class_init_patcher.start()
-        super().setUp()
-
-    def tearDown(self) -> None:
-        self.base_class_init_patcher.stop()
-        super().tearDown()
-
-    def test_init(self):
-        self.assertDictEqual(EMPTY_DICT, self.task_pool._group_meta_tasks_running)
-        self.base_class_init.assert_called_once_with(pool_size=self.TEST_POOL_SIZE, name=self.TEST_POOL_NAME)
-
-    def test__cancel_group_meta_tasks(self):
-        mock_task1, mock_task2 = MagicMock(), MagicMock()
-        self.task_pool._group_meta_tasks_running[BAR] = {mock_task1, mock_task2}
-        self.assertIsNone(self.task_pool._cancel_group_meta_tasks(FOO))
-        self.assertDictEqual({BAR: {mock_task1, mock_task2}}, self.task_pool._group_meta_tasks_running)
-        self.assertSetEqual(EMPTY_SET, self.task_pool._meta_tasks_cancelled)
-        mock_task1.cancel.assert_not_called()
-        mock_task2.cancel.assert_not_called()
-
-        self.assertIsNone(self.task_pool._cancel_group_meta_tasks(BAR))
-        self.assertDictEqual(EMPTY_DICT, self.task_pool._group_meta_tasks_running)
-        self.assertSetEqual({mock_task1, mock_task2}, self.task_pool._meta_tasks_cancelled)
-        mock_task1.cancel.assert_called_once_with()
-        mock_task2.cancel.assert_called_once_with()
-
-    @patch.object(pool.BaseTaskPool, '_cancel_and_remove_all_from_group')
-    @patch.object(pool.TaskPool, '_cancel_group_meta_tasks')
-    def test__cancel_and_remove_all_from_group(self, mock__cancel_group_meta_tasks: MagicMock,
-                                               mock_base__cancel_and_remove_all_from_group: MagicMock):
-        group_name, group_reg, msg = 'xyz', MagicMock(), FOO
-        self.assertIsNone(self.task_pool._cancel_and_remove_all_from_group(group_name, group_reg, msg=msg))
-        mock__cancel_group_meta_tasks.assert_called_once_with(group_name)
-        mock_base__cancel_and_remove_all_from_group.assert_called_once_with(group_name, group_reg, msg=msg)
-
-    @patch.object(pool.BaseTaskPool, 'cancel_group')
-    async def test_cancel_group(self, mock_base_cancel_group: AsyncMock):
-        group_name, msg = 'abc', 'xyz'
-        await self.task_pool.cancel_group(group_name, msg=msg)
-        mock_base_cancel_group.assert_awaited_once_with(group_name=group_name, msg=msg)
-
-    @patch.object(pool.BaseTaskPool, 'cancel_all')
-    async def test_cancel_all(self, mock_base_cancel_all: AsyncMock):
-        msg = 'xyz'
-        await self.task_pool.cancel_all(msg=msg)
-        mock_base_cancel_all.assert_awaited_once_with(msg=msg)
-
-    def test__pop_ended_meta_tasks(self):
-        mock_task, mock_done_task1 = MagicMock(done=lambda: False), MagicMock(done=lambda: True)
-        self.task_pool._group_meta_tasks_running[FOO] = {mock_task, mock_done_task1}
-        mock_done_task2, mock_done_task3 = MagicMock(done=lambda: True), MagicMock(done=lambda: True)
-        self.task_pool._group_meta_tasks_running[BAR] = {mock_done_task2, mock_done_task3}
-        expected_output = {mock_done_task1, mock_done_task2, mock_done_task3}
-        output = self.task_pool._pop_ended_meta_tasks()
-        self.assertSetEqual(expected_output, output)
-        self.assertDictEqual({FOO: {mock_task}}, self.task_pool._group_meta_tasks_running)
-
-    @patch.object(pool.TaskPool, '_pop_ended_meta_tasks')
-    @patch.object(pool.BaseTaskPool, 'flush')
-    async def test_flush(self, mock_base_flush: AsyncMock, mock__pop_ended_meta_tasks: MagicMock):
-        mock_ended_meta_task = AsyncMock()
-        mock__pop_ended_meta_tasks.return_value = {mock_ended_meta_task()}
-        mock_cancelled_meta_task = AsyncMock(side_effect=CancelledError)
-        self.task_pool._meta_tasks_cancelled = {mock_cancelled_meta_task()}
-        self.assertIsNone(await self.task_pool.flush(return_exceptions=False))
-        mock_base_flush.assert_awaited_once_with(return_exceptions=False)
-        mock__pop_ended_meta_tasks.assert_called_once_with()
-        mock_ended_meta_task.assert_awaited_once_with()
-        mock_cancelled_meta_task.assert_awaited_once_with()
-        self.assertSetEqual(EMPTY_SET, self.task_pool._meta_tasks_cancelled)
-
-    @patch.object(pool.BaseTaskPool, 'lock')
-    @patch.object(pool.BaseTaskPool, 'gather_and_close')
-    async def test_gather_and_close(self, mock_base_gather_and_close: AsyncMock, mock_lock: MagicMock):
-        mock_meta_task1, mock_meta_task2 = AsyncMock(), AsyncMock()
-        self.task_pool._group_meta_tasks_running = {FOO: {mock_meta_task1()}, BAR: {mock_meta_task2()}}
-        mock_cancelled_meta_task = AsyncMock(side_effect=CancelledError)
-        self.task_pool._meta_tasks_cancelled = {mock_cancelled_meta_task()}
-        self.assertIsNone(await self.task_pool.gather_and_close(return_exceptions=True))
-        mock_lock.assert_called_once_with()
-        mock_base_gather_and_close.assert_awaited_once_with(return_exceptions=True)
-        mock_meta_task1.assert_awaited_once_with()
-        mock_meta_task2.assert_awaited_once_with()
-        mock_cancelled_meta_task.assert_awaited_once_with()
-        self.assertDictEqual(EMPTY_DICT, self.task_pool._group_meta_tasks_running)
-        self.assertSetEqual(EMPTY_SET, self.task_pool._meta_tasks_cancelled)
 
     def test__generate_group_name(self):
         prefix, func = 'x y z', AsyncMock(__name__=BAR)
