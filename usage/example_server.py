@@ -67,7 +67,7 @@ async def main() -> None:
     for item in range(100):
         q.put_nowait(item)
     pool = SimpleTaskPool(worker, args=(q,))  # initializes the pool
-    await pool.start(3)  # launches three worker tasks
+    pool.start(3)  # launches three worker tasks
     control_server_task = await TCPControlServer(pool, host='127.0.0.1', port=9999).serve_forever()
     # We block until `.task_done()` has been called once by our workers for every item placed into the queue.
     await q.join()

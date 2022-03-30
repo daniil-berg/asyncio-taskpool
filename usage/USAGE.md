@@ -39,9 +39,9 @@ async def work(n: int) -> None:
 
 async def main() -> None:
     pool = SimpleTaskPool(work, args=(5,))  # initializes the pool; no work is being done yet
-    await pool.start(3)  # launches work tasks 0, 1, and 2
+    pool.start(3)  # launches work tasks 0, 1, and 2
     await asyncio.sleep(1.5)  # lets the tasks work for a bit
-    await pool.start(1)  # launches work task 3
+    pool.start(1)  # launches work task 3
     await asyncio.sleep(1.5)  # lets the tasks work for a bit
     pool.stop(2)  # cancels tasks 3 and 2 (LIFO order)
     await pool.gather_and_close()  # awaits all tasks, then flushes the pool

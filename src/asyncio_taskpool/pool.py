@@ -593,6 +593,7 @@ class TaskPool(BaseTaskPool):
         """
         if kwargs is None:
             kwargs = {}
+        # TODO: Add exception logging
         await gather(*(self._start_task(func(*args, **kwargs), group_name=group_name, end_callback=end_callback,
                                         cancel_callback=cancel_callback) for _ in range(num)))
 
@@ -610,8 +611,8 @@ class TaskPool(BaseTaskPool):
         because this method returns immediately, this does not mean that any task was started or that any number of
         tasks will start soon, as this is solely determined by the :attr:`BaseTaskPool.pool_size` and `num`.
 
-        If the entire task group is cancelled, the meta task is cancelled first, which may cause the number of tasks
-        spawned to be less than `num`.
+        If the entire task group is cancelled before `num` tasks have spawned, since the meta task is cancelled first,
+        the number of tasks spawned will end up being less than `num`.
 
         Args:
             func:
@@ -640,10 +641,13 @@ class TaskPool(BaseTaskPool):
             `PoolIsClosed`: The pool is closed.
             `NotCoroutine`: `func` is not a coroutine function.
             `PoolIsLocked`: The pool is currently locked.
+            `InvalidGroupName`: A group named `group_name` exists in the pool.
         """
         self._check_start(function=func)
         if group_name is None:
             group_name = self._generate_group_name('apply', func)
+        if group_name in self._task_groups.keys():
+            raise exceptions.InvalidGroupName(f"Group named {group_name} already exists!")
         self._task_groups.setdefault(group_name, TaskGroupRegister())
         meta_tasks = self._group_meta_tasks_running.setdefault(group_name, set())
         meta_tasks.add(create_task(self._apply_num(group_name, func, args, kwargs, num,
@@ -913,16 +917,25 @@ class SimpleTaskPool(BaseTaskPool):
         """Name of the coroutine function used in the pool."""
         return self._func.__name__
 
-    async def _start_one(self, group_name: str) -> int:
-        """Starts a single new task within the pool and returns its ID."""
-        return await self._start_task(self._func(*self._args, **self._kwargs), group_name=group_name,
-                                      end_callback=self._end_callback, cancel_callback=self._cancel_callback)
+    async def _start_num(self, num: int, group_name: str) -> None:
+        """Starts `num` new tasks in group `group_name`."""
+        start_coroutines = (
+            self._start_task(self._func(*self._args, **self._kwargs), group_name=group_name,
+                             end_callback=self._end_callback, cancel_callback=self._cancel_callback)
+            for _ in range(num)
+        )
+        await gather(*start_coroutines)
 
-    async def start(self, num: int) -> str:
+    def start(self, num: int) -> str:
         """
         Starts specified number of new tasks in the pool as a new group.
 
-        This method may block if there is less room in the pool than the desired number of new tasks.
+        Because this method delegates the spawning of the tasks to a meta task, it **never blocks**. However, just
+        because this method returns immediately, this does not mean that any task was started or that any number of
+        tasks will start soon, as this is solely determined by the :attr:`BaseTaskPool.pool_size` and `num`.
+
+        If the entire task group is cancelled before `num` tasks have spawned, since the meta task is cancelled first,
+        the number of tasks spawned will end up being less than `num`.
 
         Args:
             num: The number of new tasks to start.
@@ -931,9 +944,12 @@ class SimpleTaskPool(BaseTaskPool):
             The name of the newly created task group in the form :code:`'start-group-{idx}'`
             (with `idx` being an incrementing index).
         """
+        self._check_start(function=self._func)
         group_name = f'start-group-{self._start_calls}'
         self._start_calls += 1
-        await gather(*(self._start_one(group_name) for _ in range(num)))
+        self._task_groups.setdefault(group_name, TaskGroupRegister())
+        meta_tasks = self._group_meta_tasks_running.setdefault(group_name, set())
+        meta_tasks.add(create_task(self._start_num(num, group_name)))
         return group_name
 
     def stop(self, num: int) -> List[int]:
