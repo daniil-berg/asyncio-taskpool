@@ -548,20 +548,20 @@ class TaskPoolTestCase(CommonTestCase):
         n = 2
         mock_semaphore_cls.return_value = semaphore = Semaphore(n)
         mock__get_map_end_callback.return_value = map_cb = MagicMock()
-        awaitable = 'totally an awaitable'
-        mock_star_function.side_effect = [awaitable, Exception(), awaitable]
+        awaitable1, awaitable2 = 'totally an awaitable', object()
+        mock_star_function.side_effect = [awaitable1, Exception(), awaitable2]
         arg1, arg2, bad = 123456789, 'function argument', None
         args = [arg1, bad, arg2]
-        group_name, mock_func, stars = 'whatever', MagicMock(__name__="mock"), 3
+        grp_name, mock_func, stars = 'whatever', MagicMock(__name__="mock"), 3
         end_cb, cancel_cb = MagicMock(), MagicMock()
-        self.assertIsNone(await self.task_pool._arg_consumer(group_name, n, mock_func, args, stars, end_cb, cancel_cb))
-        # We expect the semaphore to be acquired 2 times, then be released once after the exception occurs, then
-        # acquired once more is reached. Since we initialized it with a value of 2, we expect it be locked.
+        self.assertIsNone(await self.task_pool._arg_consumer(grp_name, n, mock_func, args, stars, end_cb, cancel_cb))
+        # We initialized the semaphore with a value of 2. It should have been acquired twice. We expect it be locked.
         self.assertTrue(semaphore.locked())
         mock_semaphore_cls.assert_called_once_with(n)
         mock__get_map_end_callback.assert_called_once_with(semaphore, actual_end_callback=end_cb)
-        mock__start_task.assert_has_awaits(2 * [
-            call(awaitable, group_name=group_name, ignore_lock=True, end_callback=map_cb, cancel_callback=cancel_cb)
+        mock__start_task.assert_has_awaits([
+            call(awaitable1, group_name=grp_name, ignore_lock=True, end_callback=map_cb, cancel_callback=cancel_cb),
+            call(awaitable2, group_name=grp_name, ignore_lock=True, end_callback=map_cb, cancel_callback=cancel_cb),
         ])
         mock_star_function.assert_has_calls([
             call(mock_func, arg1, arg_stars=stars),
@@ -572,17 +572,50 @@ class TaskPoolTestCase(CommonTestCase):
         mock_semaphore_cls.reset_mock()
         mock__get_map_end_callback.reset_mock()
         mock__start_task.reset_mock()
-        mock_star_function.reset_mock()
+        mock_star_function.reset_mock(side_effect=True)
 
-        # With a CancelledError thrown while starting a task:
-        mock_semaphore_cls.return_value = semaphore = Semaphore(1)
-        mock_star_function.side_effect = CancelledError()
-        self.assertIsNone(await self.task_pool._arg_consumer(group_name, n, mock_func, args, stars, end_cb, cancel_cb))
-        self.assertFalse(semaphore.locked())
+        # With a CancelledError thrown while acquiring the semaphore:
+        mock_acquire = AsyncMock(side_effect=[True, CancelledError])
+        mock_semaphore_cls.return_value = mock_semaphore = MagicMock(acquire=mock_acquire)
+        mock_star_function.return_value = mock_coroutine = MagicMock()
+        arg_it = iter(arg for arg in (arg1, arg2, FOO))
+        self.assertIsNone(await self.task_pool._arg_consumer(grp_name, n, mock_func, arg_it, stars, end_cb, cancel_cb))
         mock_semaphore_cls.assert_called_once_with(n)
-        mock__get_map_end_callback.assert_called_once_with(semaphore, actual_end_callback=end_cb)
-        mock__start_task.assert_not_called()
-        mock_star_function.assert_called_once_with(mock_func, arg1, arg_stars=stars)
+        mock__get_map_end_callback.assert_called_once_with(mock_semaphore, actual_end_callback=end_cb)
+        mock_star_function.assert_has_calls([
+            call(mock_func, arg1, arg_stars=stars),
+            call(mock_func, arg2, arg_stars=stars)
+        ])
+        mock_acquire.assert_has_awaits([call(), call()])
+        mock__start_task.assert_awaited_once_with(mock_coroutine, group_name=grp_name, ignore_lock=True,
+                                                  end_callback=map_cb, cancel_callback=cancel_cb)
+        mock_coroutine.close.assert_called_once_with()
+        mock_semaphore.release.assert_not_called()
+        self.assertEqual(FOO, next(arg_it))
+
+        mock_acquire.reset_mock(side_effect=True)
+        mock_semaphore_cls.reset_mock()
+        mock__get_map_end_callback.reset_mock()
+        mock__start_task.reset_mock()
+        mock_star_function.reset_mock(side_effect=True)
+
+        # With a CancelledError thrown while starting the task:
+        mock__start_task.side_effect = [None, CancelledError]
+        arg_it = iter(arg for arg in (arg1, arg2, FOO))
+        self.assertIsNone(await self.task_pool._arg_consumer(grp_name, n, mock_func, arg_it, stars, end_cb, cancel_cb))
+        mock_semaphore_cls.assert_called_once_with(n)
+        mock__get_map_end_callback.assert_called_once_with(mock_semaphore, actual_end_callback=end_cb)
+        mock_star_function.assert_has_calls([
+            call(mock_func, arg1, arg_stars=stars),
+            call(mock_func, arg2, arg_stars=stars)
+        ])
+        mock_acquire.assert_has_awaits([call(), call()])
+        mock__start_task.assert_has_awaits(2 * [
+            call(mock_coroutine, group_name=grp_name, ignore_lock=True, end_callback=map_cb, cancel_callback=cancel_cb)
+        ])
+        mock_coroutine.close.assert_called_once_with()
+        mock_semaphore.release.assert_called_once_with()
+        self.assertEqual(FOO, next(arg_it))
 
     @patch.object(pool, 'create_task')
     @patch.object(pool.TaskPool, '_arg_consumer', new_callable=MagicMock)

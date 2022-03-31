@@ -326,6 +326,8 @@ class BaseTaskPool:
         """
         self._check_start(awaitable=awaitable, ignore_lock=ignore_lock)
         await self._enough_room.acquire()
+        # TODO: Make sure that cancellation (group or pool) interrupts this method after context switching!
+        #       Possibly make use of the task group register for that.
         group_reg = self._task_groups.setdefault(group_name, TaskGroupRegister())
         async with group_reg:
             task_id = self._num_started
@@ -609,8 +611,7 @@ class TaskPool(BaseTaskPool):
             except CancelledError:
                 # Either the task group or all tasks were cancelled, so this meta tasks is not supposed to spawn any
                 # more tasks and can return immediately.
-                log.debug("Cancelled spawning tasks in group '%s' after %s out of %s tasks have been spawned",
-                          group_name, i, num)
+                log.debug("Cancelled group '%s' after %s out of %s tasks have been spawned", group_name, i, num)
                 coroutine.close()
                 return
 
@@ -707,29 +708,31 @@ class TaskPool(BaseTaskPool):
                 The callback that was specified to execute after cancellation of the task (and the next one).
                 It is run with the task's ID as its only positional argument.
         """
-        map_semaphore = Semaphore(num_concurrent)
-        release_cb = self._get_map_end_callback(map_semaphore, actual_end_callback=end_callback)
-        for next_arg in arg_iter:
-            # When the number of running tasks spawned by this method reaches the specified maximum,
-            # this next line will block, until one of them ends and releases the semaphore.
-            await map_semaphore.acquire()
-            # TODO: Clean up exception handling/logging. Cancellation can also occur while awaiting the semaphore.
-            #       Wrap `star_function` call in a separate `try` block (similar to `_apply_spawner`).
+        semaphore = Semaphore(num_concurrent)
+        release_cb = self._get_map_end_callback(semaphore, actual_end_callback=end_callback)
+        for i, next_arg in enumerate(arg_iter):
+            semaphore_acquired = False
             try:
-                await self._start_task(star_function(func, next_arg, arg_stars=arg_stars), group_name=group_name,
-                                       ignore_lock=True, end_callback=release_cb, cancel_callback=cancel_callback)
-            except CancelledError:
-                # This means that no more tasks are supposed to be created from this `arg_iter`;
-                # thus, we can forget about the rest of the arguments.
-                log.debug("Cancelled consumption of argument iterable in task group '%s'", group_name)
-                map_semaphore.release()
-                return
+                coroutine = star_function(func, next_arg, arg_stars=arg_stars)
             except Exception as e:
-                # This means an exception occurred during task **creation**, meaning no task has been created.
-                # It does not imply an error within the task itself.
-                log.exception("%s occurred while trying to create task: %s(%s%s)",
-                              str(e.__class__.__name__), func.__name__, '*' * arg_stars, str(next_arg))
-                map_semaphore.release()
+                # This means there was probably something wrong with the function arguments.
+                log.exception("%s occurred in group '%s' while trying to create coroutine: %s(%s%s)",
+                              str(e.__class__.__name__), group_name, func.__name__, '*' * arg_stars, str(next_arg))
+                continue
+            try:
+                # When the number of running tasks spawned by this method reaches the specified maximum,
+                # this next line will block, until one of them ends and releases the semaphore.
+                semaphore_acquired = await semaphore.acquire()
+                await self._start_task(coroutine, group_name=group_name, ignore_lock=True,
+                                       end_callback=release_cb, cancel_callback=cancel_callback)
+            except CancelledError:
+                # Either the task group or all tasks were cancelled, so this meta tasks is not supposed to spawn any
+                # more tasks and can return immediately. (This means we drop `arg_iter` without consuming it fully.)
+                log.debug("Cancelled group '%s' after %s tasks have been spawned", group_name, i)
+                coroutine.close()
+                if semaphore_acquired:
+                    semaphore.release()
+                return
 
     def _map(self, group_name: str, num_concurrent: int, func: CoroutineFunc, arg_iter: ArgsT, arg_stars: int,
              end_callback: EndCB = None, cancel_callback: CancelCB = None) -> None:
@@ -943,6 +946,7 @@ class SimpleTaskPool(BaseTaskPool):
                              end_callback=self._end_callback, cancel_callback=self._cancel_callback)
             for _ in range(num)
         )
+        # TODO: Same deal as with the other meta tasks, provide proper cancellation handling!
         await gather(*start_coroutines)
 
     def start(self, num: int) -> str:
