@@ -528,6 +528,8 @@ class BaseTaskPool:
         self._tasks_cancelled.clear()
         self._tasks_running.clear()
         self._closed = True
+        # TODO: Turn the `_closed` attribute into an `Event` and add something like a `until_closed` method that will
+        #       await it to allow blocking until a closing command comes from a server.
 
 
 class TaskPool(BaseTaskPool):
@@ -566,36 +568,51 @@ class TaskPool(BaseTaskPool):
                 return name
             i += 1
 
-    async def _apply_num(self, group_name: str, func: CoroutineFunc, args: ArgsT = (), kwargs: KwArgsT = None,
-                         num: int = 1, end_callback: EndCB = None, cancel_callback: CancelCB = None) -> None:
+    async def _apply_spawner(self, group_name: str, func: CoroutineFunc, args: ArgsT = (), kwargs: KwArgsT = None,
+                             num: int = 1, end_callback: EndCB = None, cancel_callback: CancelCB = None) -> None:
         """
-        Creates a coroutine with the supplied arguments and runs it as a new task in the pool.
+        Creates coroutines with the supplied arguments and runs them as new tasks in the pool.
 
         This method blocks, **only if** the pool has not enough room to accommodate `num` new tasks.
 
         Args:
             group_name:
-                Name of the task group to add the new task to.
+                Name of the task group to add the new tasks to.
             func:
-                The coroutine function to be run as a task within the task pool.
+                The coroutine function to be run in `num` tasks within the task pool.
             args (optional):
-                The positional arguments to pass into the function call.
+                The positional arguments to pass into each function call.
             kwargs (optional):
-                The keyword-arguments to pass into the function call.
+                The keyword-arguments to pass into each function call.
             num (optional):
                 The number of tasks to spawn with the specified parameters.
             end_callback (optional):
-                A callback to execute after the task has ended.
+                A callback to execute after each task has ended.
                 It is run with the task's ID as its only positional argument.
             cancel_callback (optional):
-                A callback to execute after cancellation of the task.
+                A callback to execute after cancellation of each task.
                 It is run with the task's ID as its only positional argument.
         """
         if kwargs is None:
             kwargs = {}
-        # TODO: Add exception logging
-        await gather(*(self._start_task(func(*args, **kwargs), group_name=group_name, end_callback=end_callback,
-                                        cancel_callback=cancel_callback) for _ in range(num)))
+        for i in range(num):
+            try:
+                coroutine = func(*args, **kwargs)
+            except Exception as e:
+                # This means there was probably something wrong with the function arguments.
+                log.exception("%s occurred in group '%s' while trying to create coroutine: %s(*%s, **%s)",
+                              str(e.__class__.__name__), group_name, func.__name__, repr(args), repr(kwargs))
+                continue
+            try:
+                await self._start_task(coroutine, group_name=group_name, end_callback=end_callback,
+                                       cancel_callback=cancel_callback)
+            except CancelledError:
+                # Either the task group or all tasks were cancelled, so this meta tasks is not supposed to spawn any
+                # more tasks and can return immediately.
+                log.debug("Cancelled spawning tasks in group '%s' after %s out of %s tasks have been spawned",
+                          group_name, i, num)
+                coroutine.close()
+                return
 
     def apply(self, func: CoroutineFunc, args: ArgsT = (), kwargs: KwArgsT = None, num: int = 1, group_name: str = None,
               end_callback: EndCB = None, cancel_callback: CancelCB = None) -> str:
@@ -650,8 +667,8 @@ class TaskPool(BaseTaskPool):
             raise exceptions.InvalidGroupName(f"Group named {group_name} already exists!")
         self._task_groups.setdefault(group_name, TaskGroupRegister())
         meta_tasks = self._group_meta_tasks_running.setdefault(group_name, set())
-        meta_tasks.add(create_task(self._apply_num(group_name, func, args, kwargs, num,
-                                                   end_callback=end_callback, cancel_callback=cancel_callback)))
+        meta_tasks.add(create_task(self._apply_spawner(group_name, func, args, kwargs, num,
+                                                       end_callback=end_callback, cancel_callback=cancel_callback)))
         return group_name
 
     @staticmethod
@@ -696,6 +713,8 @@ class TaskPool(BaseTaskPool):
             # When the number of running tasks spawned by this method reaches the specified maximum,
             # this next line will block, until one of them ends and releases the semaphore.
             await map_semaphore.acquire()
+            # TODO: Clean up exception handling/logging. Cancellation can also occur while awaiting the semaphore.
+            #       Wrap `star_function` call in a separate `try` block (similar to `_apply_spawner`).
             try:
                 await self._start_task(star_function(func, next_arg, arg_stars=arg_stars), group_name=group_name,
                                        ignore_lock=True, end_callback=release_cb, cancel_callback=cancel_callback)

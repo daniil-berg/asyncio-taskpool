@@ -455,49 +455,65 @@ class TaskPoolTestCase(CommonTestCase):
         self.assertEqual(expected_output, output)
 
     @patch.object(pool.TaskPool, '_start_task')
-    async def test__apply_num(self, mock__start_task: AsyncMock):
-        group_name = FOO + BAR
-        mock_awaitable = object()
-        mock_func = MagicMock(return_value=mock_awaitable)
-        args, kwargs, num = (FOO, BAR), {'a': 1, 'b': 2}, 3
+    async def test__apply_spawner(self, mock__start_task: AsyncMock):
+        grp_name = FOO + BAR
+        mock_awaitable1, mock_awaitable2 = object(), object()
+        mock_func = MagicMock(side_effect=[mock_awaitable1, Exception(), mock_awaitable2], __name__='func')
+        args, kw, num = (FOO, BAR), {'a': 1, 'b': 2}, 3
         end_cb, cancel_cb = MagicMock(), MagicMock()
-        self.assertIsNone(await self.task_pool._apply_num(group_name, mock_func, args, kwargs, num, end_cb, cancel_cb))
-        mock_func.assert_has_calls(3 * [call(*args, **kwargs)])
-        mock__start_task.assert_has_awaits(3 * [
-            call(mock_awaitable, group_name=group_name, end_callback=end_cb, cancel_callback=cancel_cb)
+        self.assertIsNone(await self.task_pool._apply_spawner(grp_name, mock_func, args, kw, num, end_cb, cancel_cb))
+        mock_func.assert_has_calls(num * [call(*args, **kw)])
+        mock__start_task.assert_has_awaits([
+            call(mock_awaitable1, group_name=grp_name, end_callback=end_cb, cancel_callback=cancel_cb),
+            call(mock_awaitable2, group_name=grp_name, end_callback=end_cb, cancel_callback=cancel_cb),
         ])
 
-        mock_func.reset_mock()
+        mock_func.reset_mock(side_effect=True)
         mock__start_task.reset_mock()
 
-        self.assertIsNone(await self.task_pool._apply_num(group_name, mock_func, args, None, num, end_cb, cancel_cb))
-        mock_func.assert_has_calls(num * [call(*args)])
-        mock__start_task.assert_has_awaits(num * [
-            call(mock_awaitable, group_name=group_name, end_callback=end_cb, cancel_callback=cancel_cb)
+        # Simulate cancellation while the second task is being started.
+        mock__start_task.side_effect = [None, CancelledError, None]
+        mock_coroutine_to_close = MagicMock()
+        mock_func.side_effect = [mock_awaitable1, mock_coroutine_to_close, 'never called']
+        self.assertIsNone(await self.task_pool._apply_spawner(grp_name, mock_func, args, None, num, end_cb, cancel_cb))
+        mock_func.assert_has_calls(2 * [call(*args)])
+        mock__start_task.assert_has_awaits([
+            call(mock_awaitable1, group_name=grp_name, end_callback=end_cb, cancel_callback=cancel_cb),
+            call(mock_coroutine_to_close, group_name=grp_name, end_callback=end_cb, cancel_callback=cancel_cb),
         ])
+        mock_coroutine_to_close.close.assert_called_once_with()
 
     @patch.object(pool, 'create_task')
-    @patch.object(pool.TaskPool, '_apply_num', new_callable=MagicMock())
+    @patch.object(pool.TaskPool, '_apply_spawner', new_callable=MagicMock())
     @patch.object(pool, 'TaskGroupRegister')
     @patch.object(pool.TaskPool, '_generate_group_name')
     @patch.object(pool.BaseTaskPool, '_check_start')
     def test_apply(self, mock__check_start: MagicMock, mock__generate_group_name: MagicMock,
-                   mock_reg_cls: MagicMock, mock__apply_num: MagicMock, mock_create_task: MagicMock):
+                   mock_reg_cls: MagicMock, mock__apply_spawner: MagicMock, mock_create_task: MagicMock):
         mock__generate_group_name.return_value = generated_name = 'name 123'
         mock_group_reg = set_up_mock_group_register(mock_reg_cls)
-        mock__apply_num.return_value = mock_apply_coroutine = object()
+        mock__apply_spawner.return_value = mock_apply_coroutine = object()
         mock_create_task.return_value = fake_task = object()
         mock_func, num, group_name = MagicMock(), 3, FOO + BAR
         args, kwargs = (FOO, BAR), {'a': 1, 'b': 2}
         end_cb, cancel_cb = MagicMock(), MagicMock()
+
+        self.task_pool._task_groups = {group_name: 'causes error'}
+        with self.assertRaises(exceptions.InvalidGroupName):
+            self.task_pool.apply(mock_func, args, kwargs, num, group_name, end_cb, cancel_cb)
+        mock__check_start.assert_called_once_with(function=mock_func)
+        mock__apply_spawner.assert_not_called()
+        mock_create_task.assert_not_called()
+
+        mock__check_start.reset_mock()
         self.task_pool._task_groups = {}
 
         def check_assertions(_group_name, _output):
             self.assertEqual(_group_name, _output)
             mock__check_start.assert_called_once_with(function=mock_func)
             self.assertEqual(mock_group_reg, self.task_pool._task_groups[_group_name])
-            mock__apply_num.assert_called_once_with(_group_name, mock_func, args, kwargs, num,
-                                                    end_callback=end_cb, cancel_callback=cancel_cb)
+            mock__apply_spawner.assert_called_once_with(_group_name, mock_func, args, kwargs, num,
+                                                        end_callback=end_cb, cancel_callback=cancel_cb)
             mock_create_task.assert_called_once_with(mock_apply_coroutine)
             self.assertSetEqual({fake_task}, self.task_pool._group_meta_tasks_running[group_name])
 
@@ -507,7 +523,7 @@ class TaskPoolTestCase(CommonTestCase):
 
         mock__check_start.reset_mock()
         self.task_pool._task_groups.clear()
-        mock__apply_num.reset_mock()
+        mock__apply_spawner.reset_mock()
         mock_create_task.reset_mock()
 
         output = self.task_pool.apply(mock_func, args, kwargs, num, None, end_cb, cancel_cb)
@@ -695,6 +711,7 @@ class SimpleTaskPoolTestCase(CommonTestCase):
 
     def tearDown(self) -> None:
         self.base_class_init_patcher.stop()
+        super().tearDown()
 
     def test_init(self):
         self.assertEqual(self.TEST_POOL_FUNC, self.task_pool._func)

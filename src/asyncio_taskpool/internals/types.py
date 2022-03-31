@@ -23,7 +23,7 @@ This module should **not** be considered part of the public API.
 
 from asyncio.streams import StreamReader, StreamWriter
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Iterable, Mapping, Tuple, TypeVar, Union
+from typing import Any, Awaitable, Callable, Coroutine, Iterable, Mapping, Tuple, TypeVar, Union
 
 
 T = TypeVar('T')
@@ -32,7 +32,7 @@ ArgsT = Iterable[Any]
 KwArgsT = Mapping[str, Any]
 
 AnyCallableT = Callable[[...], Union[T, Awaitable[T]]]
-CoroutineFunc = Callable[[...], Awaitable[Any]]
+CoroutineFunc = Callable[[...], Coroutine]
 
 EndCB = Callable
 CancelCB = Callable
