@@ -17,6 +17,7 @@
 ![Lines of comments][gist-cloc-comments-img]
 ![Test coverage][gist-test-coverage-img]
 [![License: LGPL v3.0][lgpl3-img]][lgpl3]
+[![PyPI version][pypi-latest-version-img]][pypi-latest-version]
 
 **Dynamically manage pools of asyncio tasks**
 
@@ -73,12 +74,11 @@ pip install asyncio-taskpool
 
 ## Dependencies
 
-Python Version 3.8+, tested on Linux
+Python Version 3.9+, tested on Linux
 
 ## Testing
 
-Install `asyncio-taskpool[dev]` dependencies or just manually install [`coverage`](https://coverage.readthedocs.io/en/latest/) with `pip`. 
-Execute the [`./coverage.sh`](coverage.sh) shell script to run all unit tests and receive the coverage report.
+Install [`coverage`](https://coverage.readthedocs.io/en/latest/) with `pip`, then execute the [`./coverage.sh`](coverage.sh) shell script to run all unit tests and save the coverage report.
 
 ## License
 
@@ -97,3 +97,5 @@ The full license texts for the [GNU GPLv3.0](COPYING) and the [GNU LGPLv3.0](COP
 [gist-test-coverage-img]: https://img.shields.io/endpoint?logo=pytest&color=blue&url=https://gist.githubusercontent.com/daniil-berg/3f8240a976e8781a765d9c74a583dcda/raw/test-coverage.json
 [lgpl3]: https://www.gnu.org/licenses/lgpl-3.0
 [lgpl3-img]: https://img.shields.io/badge/License-LGPL_v3.0-darkgreen.svg?logo=gnu
+[pypi-latest-version-img]: https://img.shields.io/pypi/v/asyncio-taskpool?color=teal&logo=pypi
+[pypi-latest-version]: https://pypi.org/project/asyncio-taskpool/
