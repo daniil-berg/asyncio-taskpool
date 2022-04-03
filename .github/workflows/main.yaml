@@ -1,0 +1,85 @@
+name: CI
+on: [push]
+jobs:
+  tests:
+    name: Python ${{ matrix.python-version }} Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version:
+        - '3.9'
+        - '3.10'
+    steps:
+    - uses: actions/checkout@v3
+
+    - uses: actions/setup-python@v3
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+        cache-dependency-path: 'requirements/dev.txt'
+
+    - name: Upgrade packaging tools
+      run: pip install -U pip
+
+    - name: Install dependencies
+      run: pip install -U -r requirements/dev.txt
+
+    - name: Install asyncio-taskpool
+      run: pip install -e .
+
+    - name: Run tests for Python ${{ matrix.python-version }}
+      if: ${{ matrix.python-version != '3.10' }}
+      run: python -m tests
+
+    - name: Run tests for Python 3.10 and save coverage
+      if: ${{ matrix.python-version == '3.10' }}
+      run: echo "coverage=$(./coverage.sh)" >> $GITHUB_ENV
+    
+    outputs:
+      coverage: ${{ env.coverage }}
+
+  update_badges:
+    needs: tests
+    name: Update Badges
+    env:
+      meta_gist_id: 3f8240a976e8781a765d9c74a583dcda
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Download `cloc`
+        run: sudo apt-get update -y && sudo apt-get install -y cloc
+
+      - name: Count lines of code/comments
+        run: |
+          echo "cloc_code=$(./cloc.sh -c src/)" >> $GITHUB_ENV
+          echo "cloc_comments=$(./cloc.sh -m src/)" >> $GITHUB_ENV
+          echo "cloc_commentpercent=$(./cloc.sh -p src/)" >> $GITHUB_ENV
+
+      - name: Create badge for lines of code
+        uses: Schneegans/dynamic-badges-action@v1.2.0
+        with:
+          auth: ${{ secrets.GIST_META_DATA }}
+          gistID: ${{ env.meta_gist_id }}
+          filename: cloc-code.json
+          label: Lines of Code
+          message: ${{ env.cloc_code }}
+
+      - name: Create badge for lines of comments
+        uses: Schneegans/dynamic-badges-action@v1.2.0
+        with:
+          auth: ${{ secrets.GIST_META_DATA }}
+          gistID: ${{ env.meta_gist_id }}
+          filename: cloc-comments.json
+          label: Comments
+          message: ${{ env.cloc_comments }} (${{ env.cloc_commentpercent }}%)
+
+      - name: Create badge for test coverage
+        uses: Schneegans/dynamic-badges-action@v1.2.0
+        with:
+          auth: ${{ secrets.GIST_META_DATA }}
+          gistID: ${{ env.meta_gist_id }}
+          filename: test-coverage.json
+          label: Coverage
+          message: ${{ needs.tests.outputs.coverage }}

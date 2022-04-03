@@ -15,29 +15,16 @@ You should have received a copy of the GNU Lesser General Public License along w
 If not, see <https://www.gnu.org/licenses/>."""
 
 __doc__ = """
-Custom type definitions used in various modules.
-
-This module should **not** be considered part of the public API.
+Main entry point for all unit tests.
 """
 
 
-from asyncio.streams import StreamReader, StreamWriter
-from pathlib import Path
-from typing import Any, Awaitable, Callable, Coroutine, Iterable, Mapping, Tuple, TypeVar, Union
+import sys
+import unittest
 
 
-T = TypeVar('T')
-
-ArgsT = Iterable[Any]
-KwArgsT = Mapping[str, Any]
-
-AnyCallableT = Callable[..., Union[T, Awaitable[T]]]
-CoroutineFunc = Callable[..., Coroutine]
-
-EndCB = Callable
-CancelCB = Callable
-
-ConnectedCallbackT = Callable[[StreamReader, StreamWriter], Awaitable[None]]
-ClientConnT = Union[Tuple[StreamReader, StreamWriter], Tuple[None, None]]
-
-PathT = Union[Path, str]
+if __name__ == '__main__':
+    test_suite = unittest.defaultTestLoader.discover('.')
+    test_runner = unittest.TextTestRunner(resultclass=unittest.TextTestResult)
+    result = test_runner.run(test_suite)
+    sys.exit(not result.wasSuccessful())

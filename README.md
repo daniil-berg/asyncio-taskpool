@@ -1,6 +1,28 @@
+[//]: # (This file is part of asyncio-taskpool.)
+
+[//]: # (asyncio-taskpool is free software: you can redistribute it and/or modify it under the terms of)
+[//]: # (version 3.0 of the GNU Lesser General Public License as published by the Free Software Foundation.)
+
+[//]: # (asyncio-taskpool is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;)
+[//]: # (without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.)
+[//]: # (See the GNU Lesser General Public License for more details.)
+
+[//]: # (You should have received a copy of the GNU Lesser General Public License along with asyncio-taskpool.)
+[//]: # (If not, see <https://www.gnu.org/licenses/>.)
+
 # asyncio-taskpool
 
+[![GitHub last commit][github-last-commit-img]][github-last-commit]
+![Lines of code][gist-cloc-code-img]
+![Lines of comments][gist-cloc-comments-img]
+![Test coverage][gist-test-coverage-img]
+[![License: LGPL v3.0][lgpl3-img]][lgpl3]
+
 **Dynamically manage pools of asyncio tasks**
+
+Full documentation available at [RtD](https://asyncio-taskpool.readthedocs.io/en/latest).
+
+---
 
 ## Contents
 - [Contents](#contents)
@@ -67,3 +89,11 @@ The full license texts for the [GNU GPLv3.0](COPYING) and the [GNU LGPLv3.0](COP
 ---
 
 © 2022 Daniil Fajnberg
+
+[github-last-commit]: https://github.com/daniil-berg/asyncio-taskpool/commits
+[github-last-commit-img]: https://img.shields.io/github/last-commit/daniil-berg/asyncio-taskpool?label=Last%20commit&logo=git&
+[gist-cloc-code-img]: https://img.shields.io/endpoint?logo=python&color=blue&url=https://gist.githubusercontent.com/daniil-berg/3f8240a976e8781a765d9c74a583dcda/raw/cloc-code.json
+[gist-cloc-comments-img]: https://img.shields.io/endpoint?logo=sharp&color=lightgrey&url=https://gist.githubusercontent.com/daniil-berg/3f8240a976e8781a765d9c74a583dcda/raw/cloc-comments.json
+[gist-test-coverage-img]: https://img.shields.io/endpoint?logo=pytest&color=blue&url=https://gist.githubusercontent.com/daniil-berg/3f8240a976e8781a765d9c74a583dcda/raw/test-coverage.json
+[lgpl3]: https://www.gnu.org/licenses/lgpl-3.0
+[lgpl3-img]: https://img.shields.io/badge/License-LGPL_v3.0-darkgreen.svg?logo=gnu

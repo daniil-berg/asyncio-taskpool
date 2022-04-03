@@ -640,7 +640,7 @@ class TaskPool(BaseTaskPool):
             kwargs (optional):
                 The keyword-arguments to pass into each function call.
             num (optional):
-                The number of tasks to spawn with the specified parameters.
+                The number of tasks to spawn with the specified parameters. Defaults to 1.
             group_name (optional):
                 Name of the task group to add the new tasks to. By default, a unique name is constructed in the form
                 :code:`'apply-{name}-group-{idx}'` (with `name` being the name of the `func` and `idx` being an
