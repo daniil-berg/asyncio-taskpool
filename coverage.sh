@@ -12,13 +12,14 @@
 # You should have received a copy of the GNU Lesser General Public License along with asyncio-taskpool.
 # If not, see <https://www.gnu.org/licenses/>.
 
-coverage erase && coverage run -m unittest discover 2> /dev/null
+coverage erase
+coverage run 2> /dev/null
 
-typeset total
-total=$(coverage report | awk '$1 == "TOTAL" {print $NF}')
+typeset report=$(coverage report)
+typeset total=$(echo "${report}" | awk '$1 == "TOTAL" {print $NF; exit}')
 
-if [[ $total == 100% ]]; then
-  echo $total
+if [[ ${total} == 100% ]]; then
+  echo ${total}
 else
-  coverage report
+  echo "${report}"
 fi

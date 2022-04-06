@@ -1,8 +1,7 @@
 [run]
 source = src/
 branch = true
-omit =
-    .venv/*
+command_line = -m unittest discover
 
 [report]
 fail_under = 100
@@ -11,5 +10,4 @@ skip_covered = False
 exclude_lines =
     if TYPE_CHECKING:
     if __name__ == ['"]__main__['"]:
-omit =
-    tests/*
+    if sys.version_info.+:
