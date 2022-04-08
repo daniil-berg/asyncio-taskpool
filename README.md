@@ -74,7 +74,7 @@ pip install asyncio-taskpool
 
 ## Dependencies
 
-Python Version 3.9+, tested on Linux
+Python Version 3.8+, tested on Linux
 
 ## Testing
 

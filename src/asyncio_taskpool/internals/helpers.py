@@ -19,10 +19,12 @@ Miscellaneous helper functions. None of these should be considered part of the p
 """
 
 
+import builtins
+import sys
 from asyncio.coroutines import iscoroutinefunction
 from importlib import import_module
 from inspect import getdoc
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Type, Union
 
 from .types import T, AnyCallableT, ArgsT, KwArgsT
 
@@ -131,3 +133,25 @@ def resolve_dotted_path(dotted_path: str) -> object:
             import_module(module_name)
             found = getattr(found, name)
     return found
+
+
+class ClassMethodWorkaround:
+    """Dirty workaround to make the `@classmethod` decorator work with properties."""
+
+    def __init__(self, method_or_property: Union[Callable, property]) -> None:
+        if isinstance(method_or_property, property):
+            self._getter = method_or_property.fget
+        else:
+            self._getter = method_or_property
+
+    def __get__(self, obj: Union[T, None], cls: Union[Type[T], None]) -> Any:
+        if obj is None:
+            return self._getter(cls)
+        return self._getter(obj)
+
+
+# Starting with Python 3.9, this is thankfully no longer necessary.
+if sys.version_info[:2] < (3, 9):
+    classmethod = ClassMethodWorkaround
+else:
+    classmethod = builtins.classmethod

@@ -19,7 +19,7 @@ Unittests for the `asyncio_taskpool.helpers` module.
 """
 
 
-from unittest import IsolatedAsyncioTestCase
+from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import MagicMock, AsyncMock, NonCallableMagicMock, call, patch
 
 from asyncio_taskpool.internals import helpers
@@ -122,3 +122,33 @@ class HelpersTestCase(IsolatedAsyncioTestCase):
             with self.assertRaises(AttributeError):
                 helpers.resolve_dotted_path('foo.bar.baz')
             mock_import_module.assert_has_calls([call('foo'), call('foo.bar')])
+
+
+class ClassMethodWorkaroundTestCase(TestCase):
+    def test_init(self):
+        def func(): return 'foo'
+        def getter(): return 'bar'
+        prop = property(getter)
+        instance = helpers.ClassMethodWorkaround(func)
+        self.assertIs(func, instance._getter)
+        instance = helpers.ClassMethodWorkaround(prop)
+        self.assertIs(getter, instance._getter)
+
+    @patch.object(helpers.ClassMethodWorkaround, '__init__', return_value=None)
+    def test_get(self, _mock_init: MagicMock):
+        def func(x: MagicMock): return x.__name__
+        instance = helpers.ClassMethodWorkaround(MagicMock())
+        instance._getter = func
+        obj, cls = None, MagicMock
+        expected_output = 'MagicMock'
+        output = instance.__get__(obj, cls)
+        self.assertEqual(expected_output, output)
+
+        obj = MagicMock(__name__='bar')
+        expected_output = 'bar'
+        output = instance.__get__(obj, cls)
+        self.assertEqual(expected_output, output)
+
+        cls = None
+        output = instance.__get__(obj, cls)
+        self.assertEqual(expected_output, output)

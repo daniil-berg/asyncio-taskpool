@@ -17,19 +17,21 @@ If not, see <https://www.gnu.org/licenses/>."""
 __doc__ = """
 Definition of the :class:`ControlParser` used in a 
 :class:`ControlSession <asyncio_taskpool.control.session.ControlSession>`.
+
+It should not be considered part of the public API.
 """
 
 
 import logging
 from argparse import Action, ArgumentParser, ArgumentDefaultsHelpFormatter, HelpFormatter, ArgumentTypeError, SUPPRESS
 from ast import literal_eval
-from asyncio.streams import StreamWriter
 from inspect import Parameter, getmembers, isfunction, signature
+from io import StringIO
 from shutil import get_terminal_size
 from typing import Any, Callable, Container, Dict, Iterable, Set, Type, TypeVar
 
 from ..exceptions import HelpRequested, ParserError
-from ..internals.constants import CLIENT_INFO, CMD, STREAM_WRITER
+from ..internals.constants import CLIENT_INFO, CMD
 from ..internals.helpers import get_first_doc_line, resolve_dotted_path
 from ..internals.types import ArgsT, CancelCB, CoroutineFunc, EndCB, KwArgsT
 
@@ -52,8 +54,8 @@ class ControlParser(ArgumentParser):
     """
     Subclass of the standard :code:`argparse.ArgumentParser` for pool control.
 
-    Such a parser is not supposed to ever print to stdout/stderr, but instead direct all messages to a `StreamWriter`
-    instance passed to it during initialization.
+    Such a parser is not supposed to ever print to stdout/stderr, but instead direct all messages to a file-like
+    `StringIO` instance passed to it during initialization.
     Furthermore, it requires defining the width of the terminal, to adjust help formatting to the terminal size of a
     connected client.
     Finally, it offers some convenience methods and makes use of custom exceptions.
@@ -87,25 +89,23 @@ class ControlParser(ArgumentParser):
                 super().__init__(*args, **kwargs)
         return ClientHelpFormatter
 
-    def __init__(self, stream_writer: StreamWriter, terminal_width: int = None, **kwargs) -> None:
+    def __init__(self, stream: StringIO, terminal_width: int = None, **kwargs) -> None:
         """
         Sets some internal attributes in addition to the base class.
 
         Args:
-            stream_writer:
-                The instance of the :class:`asyncio.StreamWriter` to use for message output.
+            stream:
+                A file-like I/O object to use for message output.
             terminal_width (optional):
                 The terminal width to use for all message formatting. By default the :code:`columns` attribute from
                 :func:`shutil.get_terminal_size` is taken.
             **kwargs(optional):
                 Passed to the parent class constructor. The exception is the `formatter_class` parameter: Even if a
                 class is specified, it will always be subclassed in the :meth:`help_formatter_factory`.
-                Also, by default, `exit_on_error` is set to `False` (as opposed to how the parent class handles it).
         """
-        self._stream_writer: StreamWriter = stream_writer
+        self._stream: StringIO = stream
         self._terminal_width: int = terminal_width if terminal_width is not None else get_terminal_size().columns
         kwargs['formatter_class'] = self.help_formatter_factory(self._terminal_width, kwargs.get('formatter_class'))
-        kwargs.setdefault('exit_on_error', False)
         super().__init__(**kwargs)
         self._flags: Set[str] = set()
         self._commands = None
@@ -194,7 +194,7 @@ class ControlParser(ArgumentParser):
             Dictionary mapping class member names to the (sub-)parsers created from them.
         """
         parsers: ParsersDict = {}
-        common_kwargs = {STREAM_WRITER: self._stream_writer, CLIENT_INFO.TERMINAL_WIDTH: self._terminal_width}
+        common_kwargs = {'stream': self._stream, CLIENT_INFO.TERMINAL_WIDTH: self._terminal_width}
         for name, member in getmembers(cls):
             if name in omit_members or (name.startswith('_') and public_only):
                 continue
@@ -214,9 +214,9 @@ class ControlParser(ArgumentParser):
         return self._commands
 
     def _print_message(self, message: str, *args, **kwargs) -> None:
-        """This is overridden to ensure that no messages are sent to stdout/stderr, but always to the stream writer."""
+        """This is overridden to ensure that no messages are sent to stdout/stderr, but always to the stream buffer."""
         if message:
-            self._stream_writer.write(message.encode())
+            self._stream.write(message)
 
     def exit(self, status: int = 0, message: str = None) -> None:
         """This is overridden to prevent system exit to be invoked."""

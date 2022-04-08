@@ -38,7 +38,7 @@ class CLITestCase(IsolatedAsyncioTestCase):
         mock_client = MagicMock(start=mock_client_start)
         mock_client_cls = MagicMock(return_value=mock_client)
         mock_client_kwargs = {'foo': 123, 'bar': 456, 'baz': 789}
-        mock_parse_cli.return_value = {module.CLIENT_CLASS: mock_client_cls} | mock_client_kwargs
+        mock_parse_cli.return_value = {module.CLIENT_CLASS: mock_client_cls, **mock_client_kwargs}
         self.assertIsNone(await module.main())
         mock_parse_cli.assert_called_once_with()
         mock_client_cls.assert_called_once_with(**mock_client_kwargs)

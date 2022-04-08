@@ -31,6 +31,7 @@ from typing import Optional, Union
 from .client import ControlClient, TCPControlClient, UnixControlClient
 from .session import ControlSession
 from ..pool import AnyTaskPoolT
+from ..internals.helpers import classmethod
 from ..internals.types import ConnectedCallbackT, PathT
 
 

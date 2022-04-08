@@ -97,21 +97,22 @@ class ControlClient(ABC):
             writer: The `asyncio.StreamWriter` returned by the `_open_connection()` method
 
         Returns:
-            `None`, if either `Ctrl+C` was hit, or the user wants the client to disconnect;
-            otherwise, the user's input, stripped of leading and trailing spaces and converted to lowercase.
+            `None`, if either `Ctrl+C` was hit, an empty or whitespace-only string was entered, or the user wants the
+            client to disconnect; otherwise, returns the user's input, stripped of leading and trailing spaces and
+            converted to lowercase.
         """
         try:
-            msg = input("> ").strip().lower()
+            cmd = input("> ").strip().lower()
         except EOFError:  # Ctrl+D shall be equivalent to the :const:`CLIENT_EXIT` command.
-            msg = CLIENT_EXIT
+            cmd = CLIENT_EXIT
         except KeyboardInterrupt:  # Ctrl+C shall simply reset to the input prompt.
             print()
             return
-        if msg == CLIENT_EXIT:
+        if cmd == CLIENT_EXIT:
             writer.close()
             self._connected = False
             return
-        return msg
+        return cmd or None  # will be None if `cmd` is an empty string
 
     async def _interact(self, reader: StreamReader, writer: StreamWriter) -> None:
         """

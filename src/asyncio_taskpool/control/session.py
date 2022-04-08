@@ -16,6 +16,8 @@ If not, see <https://www.gnu.org/licenses/>."""
 
 __doc__ = """
 Definition of the :class:`ControlSession` used by a :class:`ControlServer`.
+
+It should not be considered part of the public API.
 """
 
 
@@ -24,12 +26,13 @@ import json
 from argparse import ArgumentError
 from asyncio.streams import StreamReader, StreamWriter
 from inspect import isfunction, signature
+from io import StringIO
 from typing import Callable, Optional, Union, TYPE_CHECKING
 
 from .parser import ControlParser
 from ..exceptions import CommandError, HelpRequested, ParserError
 from ..pool import TaskPool, SimpleTaskPool
-from ..internals.constants import CLIENT_INFO, CMD, CMD_OK, SESSION_MSG_BYTES, STREAM_WRITER
+from ..internals.constants import CLIENT_INFO, CMD, CMD_OK, SESSION_MSG_BYTES
 from ..internals.helpers import return_or_exception
 
 if TYPE_CHECKING:
@@ -72,6 +75,7 @@ class ControlSession:
         self._reader: StreamReader = reader
         self._writer: StreamWriter = writer
         self._parser: Optional[ControlParser] = None
+        self._response_buffer: StringIO = StringIO()
 
     async def _exec_method_and_respond(self, method: Callable, **kwargs) -> None:
         """
@@ -133,7 +137,7 @@ class ControlSession:
         client_info = json.loads((await self._reader.read(SESSION_MSG_BYTES)).decode().strip())
         log.debug("%s connected", self._client_class_name)
         parser_kwargs = {
-            STREAM_WRITER: self._writer,
+            'stream': self._response_buffer,
             CLIENT_INFO.TERMINAL_WIDTH: client_info[CLIENT_INFO.TERMINAL_WIDTH],
             'prog': '',
             'usage': f'[-h] [{CMD}] ...'
@@ -160,7 +164,7 @@ class ControlSession:
             kwargs = vars(self._parser.parse_args(msg.split(' ')))
         except ArgumentError as e:
             log.debug("%s got an ArgumentError", self._client_class_name)
-            self._writer.write(str(e).encode())
+            self._response_buffer.write(str(e))
             return
         except (HelpRequested, ParserError):
             log.debug("%s received usage help", self._client_class_name)
@@ -171,7 +175,7 @@ class ControlSession:
         elif isinstance(command, property):
             await self._exec_property_and_respond(command, **kwargs)
         else:
-            self._writer.write(str(CommandError(f"Unknown command object: {command}")).encode())
+            self._response_buffer.write(str(CommandError(f"Unknown command object: {command}")))
 
     async def listen(self) -> None:
         """
@@ -188,4 +192,8 @@ class ControlSession:
                 log.debug("%s disconnected", self._client_class_name)
                 break
             await self._parse_command(msg)
+            response = self._response_buffer.getvalue()
+            self._response_buffer.seek(0)
+            self._response_buffer.truncate()
+            self._writer.write(response.encode())
             await self._writer.drain()

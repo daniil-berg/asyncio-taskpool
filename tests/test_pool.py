@@ -729,13 +729,15 @@ class SimpleTaskPoolTestCase(CommonTestCase):
     TEST_POOL_CANCEL_CB = MagicMock()
 
     def get_task_pool_init_params(self) -> dict:
-        return super().get_task_pool_init_params() | {
+        params = super().get_task_pool_init_params()
+        params.update({
             'func': self.TEST_POOL_FUNC,
             'args': self.TEST_POOL_ARGS,
             'kwargs': self.TEST_POOL_KWARGS,
             'end_callback': self.TEST_POOL_END_CB,
             'cancel_callback': self.TEST_POOL_CANCEL_CB,
-        }
+        })
+        return params
 
     def setUp(self) -> None:
         self.base_class_init_patcher = patch.object(pool.BaseTaskPool, '__init__')

@@ -13,6 +13,4 @@ Submodules
    :maxdepth: 4
 
    asyncio_taskpool.control.client
-   asyncio_taskpool.control.parser
    asyncio_taskpool.control.server
-   asyncio_taskpool.control.session

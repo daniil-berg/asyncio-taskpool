@@ -27,7 +27,6 @@ DEFAULT_TASK_GROUP = 'default'
 
 SESSION_MSG_BYTES = 1024 * 100
 
-STREAM_WRITER = 'stream_writer'
 CMD = 'command'
 CMD_OK = b"ok"
 

@@ -21,11 +21,12 @@ Unittests for the `asyncio_taskpool.session` module.
 
 import json
 from argparse import ArgumentError, Namespace
+from io import StringIO
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
 from asyncio_taskpool.control import session
-from asyncio_taskpool.internals.constants import CLIENT_INFO, CMD, SESSION_MSG_BYTES, STREAM_WRITER
+from asyncio_taskpool.internals.constants import CLIENT_INFO, CMD, SESSION_MSG_BYTES
 from asyncio_taskpool.exceptions import HelpRequested
 from asyncio_taskpool.pool import SimpleTaskPool
 
@@ -61,14 +62,15 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         self.assertEqual(self.mock_reader, self.session._reader)
         self.assertEqual(self.mock_writer, self.session._writer)
         self.assertIsNone(self.session._parser)
+        self.assertIsInstance(self.session._response_buffer, StringIO)
 
     @patch.object(session, 'return_or_exception')
     async def test__exec_method_and_respond(self, mock_return_or_exception: AsyncMock):
         def method(self, arg1, arg2, *var_args, **rest): pass
         test_arg1, test_arg2, test_var_args, test_rest = 123, 'xyz', [0.1, 0.2, 0.3], {'aaa': 1, 'bbb': 11}
-        kwargs = {'arg1': test_arg1, 'arg2': test_arg2, 'var_args': test_var_args} | test_rest
+        kwargs = {'arg1': test_arg1, 'arg2': test_arg2, 'var_args': test_var_args}
         mock_return_or_exception.return_value = None
-        self.assertIsNone(await self.session._exec_method_and_respond(method, **kwargs))
+        self.assertIsNone(await self.session._exec_method_and_respond(method, **kwargs, **test_rest))
         mock_return_or_exception.assert_awaited_once_with(
             method, self.mock_pool, test_arg1, test_arg2, *test_var_args, **test_rest
         )
@@ -104,7 +106,7 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         self.mock_reader.read = mock_read
         self.mock_writer.drain = AsyncMock()
         expected_parser_kwargs = {
-            STREAM_WRITER: self.mock_writer,
+            'stream': self.session._response_buffer,
             CLIENT_INFO.TERMINAL_WIDTH: width,
             'prog': '',
             'usage': f'[-h] [{CMD}] ...'
@@ -132,10 +134,9 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         kwargs = {FOO: BAR, 'hello': 'python'}
         mock_parse_args = MagicMock(return_value=Namespace(**{CMD: method}, **kwargs))
         self.session._parser = MagicMock(parse_args=mock_parse_args)
-        self.mock_writer.write = MagicMock()
         self.assertIsNone(await self.session._parse_command(msg))
         mock_parse_args.assert_called_once_with(msg.split(' '))
-        self.mock_writer.write.assert_not_called()
+        self.assertEqual('', self.session._response_buffer.getvalue())
         mock__exec_method_and_respond.assert_awaited_once_with(method, **kwargs)
         mock__exec_property_and_respond.assert_not_called()
 
@@ -145,7 +146,7 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         mock_parse_args.return_value = Namespace(**{CMD: prop}, **kwargs)
         self.assertIsNone(await self.session._parse_command(msg))
         mock_parse_args.assert_called_once_with(msg.split(' '))
-        self.mock_writer.write.assert_not_called()
+        self.assertEqual('', self.session._response_buffer.getvalue())
         mock__exec_method_and_respond.assert_not_called()
         mock__exec_property_and_respond.assert_awaited_once_with(prop, **kwargs)
 
@@ -161,26 +162,28 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         mock_parse_args.assert_called_once_with(msg.split(' '))
         mock__exec_method_and_respond.assert_not_called()
         mock__exec_property_and_respond.assert_not_called()
-        self.mock_writer.write.assert_called_once_with(str(exc).encode())
+        self.assertEqual(str(exc), self.session._response_buffer.getvalue())
 
         mock__exec_property_and_respond.reset_mock()
         mock_parse_args.reset_mock()
-        self.mock_writer.write.reset_mock()
+        self.session._response_buffer.seek(0)
+        self.session._response_buffer.truncate()
 
         mock_parse_args.side_effect = exc = ArgumentError(MagicMock(), "oops")
         self.assertIsNone(await self.session._parse_command(msg))
         mock_parse_args.assert_called_once_with(msg.split(' '))
-        self.mock_writer.write.assert_called_once_with(str(exc).encode())
+        self.assertEqual(str(exc), self.session._response_buffer.getvalue())
         mock__exec_method_and_respond.assert_not_awaited()
         mock__exec_property_and_respond.assert_not_awaited()
 
-        self.mock_writer.write.reset_mock()
         mock_parse_args.reset_mock()
+        self.session._response_buffer.seek(0)
+        self.session._response_buffer.truncate()
 
         mock_parse_args.side_effect = HelpRequested()
         self.assertIsNone(await self.session._parse_command(msg))
         mock_parse_args.assert_called_once_with(msg.split(' '))
-        self.mock_writer.write.assert_not_called()
+        self.assertEqual('', self.session._response_buffer.getvalue())
         mock__exec_method_and_respond.assert_not_awaited()
         mock__exec_property_and_respond.assert_not_awaited()
 
@@ -191,17 +194,23 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         self.mock_writer.drain = AsyncMock(side_effect=make_reader_return_empty)
         msg = "fascinating"
         self.mock_reader.read = AsyncMock(return_value=f' {msg} '.encode())
+        response = FOO + BAR + FOO
+        self.session._response_buffer.write(response)
         self.assertIsNone(await self.session.listen())
         self.mock_reader.read.assert_has_awaits([call(SESSION_MSG_BYTES), call(SESSION_MSG_BYTES)])
         mock__parse_command.assert_awaited_once_with(msg)
+        self.assertEqual('', self.session._response_buffer.getvalue())
+        self.mock_writer.write.assert_called_once_with(response.encode())
         self.mock_writer.drain.assert_awaited_once_with()
 
         self.mock_reader.read.reset_mock()
         mock__parse_command.reset_mock()
+        self.mock_writer.write.reset_mock()
         self.mock_writer.drain.reset_mock()
 
         self.mock_server.is_serving = MagicMock(return_value=False)
         self.assertIsNone(await self.session.listen())
         self.mock_reader.read.assert_not_awaited()
         mock__parse_command.assert_not_awaited()
+        self.mock_writer.write.assert_not_called()
         self.mock_writer.drain.assert_not_awaited()

@@ -41,9 +41,9 @@ class ControlParserTestCase(TestCase):
         self.help_formatter_factory_patcher = patch.object(parser.ControlParser, 'help_formatter_factory')
         self.mock_help_formatter_factory = self.help_formatter_factory_patcher.start()
         self.mock_help_formatter_factory.return_value = RawTextHelpFormatter
-        self.stream_writer, self.terminal_width = MagicMock(), 420
+        self.stream, self.terminal_width = MagicMock(), 420
         self.kwargs = {
-            'stream_writer': self.stream_writer,
+            'stream': self.stream,
             'terminal_width': self.terminal_width,
             'formatter_class': FOO
         }
@@ -72,10 +72,9 @@ class ControlParserTestCase(TestCase):
 
     def test_init(self):
         self.assertIsInstance(self.parser, ArgumentParser)
-        self.assertEqual(self.stream_writer, self.parser._stream_writer)
+        self.assertEqual(self.stream, self.parser._stream)
         self.assertEqual(self.terminal_width, self.parser._terminal_width)
         self.mock_help_formatter_factory.assert_called_once_with(self.terminal_width, FOO)
-        self.assertFalse(getattr(self.parser, 'exit_on_error'))
         self.assertEqual(RawTextHelpFormatter, getattr(self.parser, 'formatter_class'))
         self.assertSetEqual(set(), self.parser._flags)
         self.assertIsNone(self.parser._commands)
@@ -89,7 +88,7 @@ class ControlParserTestCase(TestCase):
         mock_get_first_doc_line.return_value = mock_help = 'help 123'
         kwargs = {FOO: 1, BAR: 2, parser.DESCRIPTION: FOO + BAR}
         expected_name = 'foo-bar'
-        expected_kwargs = {parser.NAME: expected_name, parser.PROG: expected_name, parser.HELP: mock_help} | kwargs
+        expected_kwargs = {parser.NAME: expected_name, parser.PROG: expected_name, parser.HELP: mock_help, **kwargs}
         to_omit = ['abc', 'xyz']
         output = self.parser.add_function_command(foo_bar, omit_params=to_omit, **kwargs)
         self.assertEqual(mock_subparser, output)
@@ -107,7 +106,7 @@ class ControlParserTestCase(TestCase):
         mock_get_first_doc_line.return_value = mock_help = 'help 123'
         kwargs = {FOO: 1, BAR: 2, parser.DESCRIPTION: FOO + BAR}
         expected_name = 'get-prop'
-        expected_kwargs = {parser.NAME: expected_name, parser.PROG: expected_name, parser.HELP: mock_help} | kwargs
+        expected_kwargs = {parser.NAME: expected_name, parser.PROG: expected_name, parser.HELP: mock_help, **kwargs}
         output = self.parser.add_property_command(prop, **kwargs)
         self.assertEqual(mock_subparser, output)
         mock_get_first_doc_line.assert_called_once_with(get_prop)
@@ -119,7 +118,7 @@ class ControlParserTestCase(TestCase):
 
         prop = property(get_prop, set_prop)
         expected_help = f"Get/set the `.{expected_name}` property"
-        expected_kwargs = {parser.NAME: expected_name, parser.PROG: expected_name, parser.HELP: expected_help} | kwargs
+        expected_kwargs = {parser.NAME: expected_name, parser.PROG: expected_name, parser.HELP: expected_help, **kwargs}
         output = self.parser.add_property_command(prop, **kwargs)
         self.assertEqual(mock_subparser, output)
         mock_get_first_doc_line.assert_has_calls([call(get_prop), call(set_prop)])
@@ -152,8 +151,7 @@ class ControlParserTestCase(TestCase):
         mock_subparser = MagicMock(set_defaults=mock_set_defaults)
         mock_add_function_command.return_value = mock_add_property_command.return_value = mock_subparser
         x = 'x'
-        common_kwargs = {parser.STREAM_WRITER: self.parser._stream_writer,
-                         parser.CLIENT_INFO.TERMINAL_WIDTH: self.parser._terminal_width}
+        common_kwargs = {'stream': self.parser._stream, parser.CLIENT_INFO.TERMINAL_WIDTH: self.parser._terminal_width}
         expected_output = {'method': mock_subparser, 'prop': mock_subparser}
         output = self.parser.add_class_commands(FooBar, public_only=True, omit_members=['to_omit'], member_arg_name=x)
         self.assertDictEqual(expected_output, output)
@@ -170,12 +168,12 @@ class ControlParserTestCase(TestCase):
         mock_base_add_subparsers.assert_called_once_with(*args, **kwargs)
 
     def test__print_message(self):
-        self.stream_writer.write = MagicMock()
+        self.stream.write = MagicMock()
         self.assertIsNone(self.parser._print_message(''))
-        self.stream_writer.write.assert_not_called()
+        self.stream.write.assert_not_called()
         msg = 'foo bar baz'
         self.assertIsNone(self.parser._print_message(msg))
-        self.stream_writer.write.assert_called_once_with(msg.encode())
+        self.stream.write.assert_called_once_with(msg)
 
     @patch.object(parser.ControlParser, '_print_message')
     def test_exit(self, mock__print_message: MagicMock):
