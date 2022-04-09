@@ -87,7 +87,7 @@ By contrast, here is how you would do it with a task pool:
    ...
    await pool.flush()
 
-Pretty much self-explanatory, no?
+Pretty much self-explanatory, no? (See :doc:`here <./ids>` for more information about groups/names).
 
 Let's consider a slightly more involved example. Assume you have a coroutine function that takes just one argument (some data) as input, does some work with it (maybe connects to the internet in the process), and eventually writes its results to a database (which is globally defined). Here is how that might look:
 

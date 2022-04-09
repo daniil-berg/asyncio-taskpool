@@ -45,6 +45,7 @@ Contents
    :maxdepth: 2
 
    pages/pool
+   pages/ids
    pages/control
    api/api
 
