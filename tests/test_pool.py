@@ -311,13 +311,32 @@ class BaseTaskPoolTestCase(CommonTestCase):
             self.task_pool._get_running_task(task_id)
         mock__task_name.assert_not_called()
 
+    @patch('warnings.warn')
+    def test__get_cancel_kw(self, mock_warn: MagicMock):
+        msg = None
+        self.assertDictEqual(EMPTY_DICT, pool.BaseTaskPool._get_cancel_kw(msg))
+        mock_warn.assert_not_called()
+
+        msg = 'something'
+        with patch.object(pool, 'PYTHON_BEFORE_39', new=True):
+            self.assertDictEqual(EMPTY_DICT, pool.BaseTaskPool._get_cancel_kw(msg))
+            mock_warn.assert_called_once()
+        mock_warn.reset_mock()
+
+        with patch.object(pool, 'PYTHON_BEFORE_39', new=False):
+            self.assertDictEqual({'msg': msg}, pool.BaseTaskPool._get_cancel_kw(msg))
+            mock_warn.assert_not_called()
+
+    @patch.object(pool.BaseTaskPool, '_get_cancel_kw')
     @patch.object(pool.BaseTaskPool, '_get_running_task')
-    def test_cancel(self, mock__get_running_task: MagicMock):
+    def test_cancel(self, mock__get_running_task: MagicMock, mock__get_cancel_kw: MagicMock):
+        mock__get_cancel_kw.return_value = fake_cancel_kw = {'a': 10, 'b': 20}
         task_id1, task_id2, task_id3 = 1, 4, 9
         mock__get_running_task.return_value.cancel = mock_cancel = MagicMock()
         self.assertIsNone(self.task_pool.cancel(task_id1, task_id2, task_id3, msg=FOO))
         mock__get_running_task.assert_has_calls([call(task_id1), call(task_id2), call(task_id3)])
-        mock_cancel.assert_has_calls([call(msg=FOO), call(msg=FOO), call(msg=FOO)])
+        mock__get_cancel_kw.assert_called_once_with(FOO)
+        mock_cancel.assert_has_calls(3 * [call(**fake_cancel_kw)])
 
     def test__cancel_group_meta_tasks(self):
         mock_task1, mock_task2 = MagicMock(), MagicMock()
@@ -336,6 +355,7 @@ class BaseTaskPoolTestCase(CommonTestCase):
 
     @patch.object(pool.BaseTaskPool, '_cancel_group_meta_tasks')
     def test__cancel_and_remove_all_from_group(self, mock__cancel_group_meta_tasks: MagicMock):
+        kw = {BAR: 10, BAZ: 20}
         task_id = 555
         mock_cancel = MagicMock()
 
@@ -347,27 +367,33 @@ class BaseTaskPoolTestCase(CommonTestCase):
 
         class MockRegister(set, MagicMock):
             pass
-        self.assertIsNone(self.task_pool._cancel_and_remove_all_from_group(' ', MockRegister({task_id, 'x'}), msg=FOO))
-        mock_cancel.assert_called_once_with(msg=FOO)
+        self.assertIsNone(self.task_pool._cancel_and_remove_all_from_group(' ', MockRegister({task_id, 'x'}), **kw))
+        mock_cancel.assert_called_once_with(**kw)
 
+    @patch.object(pool.BaseTaskPool, '_get_cancel_kw')
     @patch.object(pool.BaseTaskPool, '_cancel_and_remove_all_from_group')
-    def test_cancel_group(self, mock__cancel_and_remove_all_from_group: MagicMock):
+    def test_cancel_group(self, mock__cancel_and_remove_all_from_group: MagicMock, mock__get_cancel_kw: MagicMock):
+        mock__get_cancel_kw.return_value = fake_cancel_kw = {'a': 10, 'b': 20}
         self.task_pool._task_groups[FOO] = mock_group_reg = MagicMock()
         with self.assertRaises(exceptions.InvalidGroupName):
             self.task_pool.cancel_group(BAR)
         mock__cancel_and_remove_all_from_group.assert_not_called()
         self.assertIsNone(self.task_pool.cancel_group(FOO, msg=BAR))
         self.assertDictEqual(EMPTY_DICT, self.task_pool._task_groups)
-        mock__cancel_and_remove_all_from_group.assert_called_once_with(FOO, mock_group_reg, msg=BAR)
+        mock__get_cancel_kw.assert_called_once_with(BAR)
+        mock__cancel_and_remove_all_from_group.assert_called_once_with(FOO, mock_group_reg, **fake_cancel_kw)
 
+    @patch.object(pool.BaseTaskPool, '_get_cancel_kw')
     @patch.object(pool.BaseTaskPool, '_cancel_and_remove_all_from_group')
-    def test_cancel_all(self, mock__cancel_and_remove_all_from_group: MagicMock):
+    def test_cancel_all(self, mock__cancel_and_remove_all_from_group: MagicMock, mock__get_cancel_kw: MagicMock):
+        mock__get_cancel_kw.return_value = fake_cancel_kw = {'a': 10, 'b': 20}
         mock_group_reg = MagicMock()
         self.task_pool._task_groups = {FOO: mock_group_reg, BAR: mock_group_reg}
-        self.assertIsNone(self.task_pool.cancel_all('msg'))
+        self.assertIsNone(self.task_pool.cancel_all(BAZ))
+        mock__get_cancel_kw.assert_called_once_with(BAZ)
         mock__cancel_and_remove_all_from_group.assert_has_calls([
-            call(BAR, mock_group_reg, msg='msg'),
-            call(FOO, mock_group_reg, msg='msg')
+            call(BAR, mock_group_reg, **fake_cancel_kw),
+            call(FOO, mock_group_reg, **fake_cancel_kw)
         ])
 
     def test__pop_ended_meta_tasks(self):

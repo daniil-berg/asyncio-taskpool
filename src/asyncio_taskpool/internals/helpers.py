@@ -20,12 +20,12 @@ Miscellaneous helper functions. None of these should be considered part of the p
 
 
 import builtins
-import sys
 from asyncio.coroutines import iscoroutinefunction
 from importlib import import_module
 from inspect import getdoc
 from typing import Any, Callable, Optional, Type, Union
 
+from .constants import PYTHON_BEFORE_39
 from .types import T, AnyCallableT, ArgsT, KwArgsT
 
 
@@ -151,7 +151,7 @@ class ClassMethodWorkaround:
 
 
 # Starting with Python 3.9, this is thankfully no longer necessary.
-if sys.version_info[:2] < (3, 9):
+if PYTHON_BEFORE_39:
     classmethod = ClassMethodWorkaround
 else:
     classmethod = builtins.classmethod

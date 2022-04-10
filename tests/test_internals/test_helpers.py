@@ -18,10 +18,11 @@ __doc__ = """
 Unittests for the `asyncio_taskpool.helpers` module.
 """
 
-
+import importlib
 from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import MagicMock, AsyncMock, NonCallableMagicMock, call, patch
 
+from asyncio_taskpool.internals import constants
 from asyncio_taskpool.internals import helpers
 
 
@@ -152,3 +153,15 @@ class ClassMethodWorkaroundTestCase(TestCase):
         cls = None
         output = instance.__get__(obj, cls)
         self.assertEqual(expected_output, output)
+
+    def test_correct_class(self):
+        is_older_python = constants.PYTHON_BEFORE_39
+        try:
+            constants.PYTHON_BEFORE_39 = True
+            importlib.reload(helpers)
+            self.assertIs(helpers.ClassMethodWorkaround, helpers.classmethod)
+            constants.PYTHON_BEFORE_39 = False
+            importlib.reload(helpers)
+            self.assertIs(classmethod, helpers.classmethod)
+        finally:
+            constants.PYTHON_BEFORE_39 = is_older_python

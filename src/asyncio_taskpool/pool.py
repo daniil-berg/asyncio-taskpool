@@ -28,6 +28,7 @@ For further details about the classes check their respective documentation.
 
 
 import logging
+import warnings
 from asyncio.coroutines import iscoroutine, iscoroutinefunction
 from asyncio.exceptions import CancelledError
 from asyncio.locks import Semaphore
@@ -37,7 +38,7 @@ from math import inf
 from typing import Any, Awaitable, Dict, Iterable, List, Set, Union
 
 from . import exceptions
-from .internals.constants import DEFAULT_TASK_GROUP
+from .internals.constants import DEFAULT_TASK_GROUP, PYTHON_BEFORE_39
 from .internals.group_register import TaskGroupRegister
 from .internals.helpers import execute_optional, star_function
 from .internals.types import ArgsT, KwArgsT, CoroutineFunc, EndCB, CancelCB
@@ -360,6 +361,23 @@ class BaseTaskPool:
                 raise exceptions.AlreadyEnded(f"{self._task_name(task_id)} has finished running")
             raise exceptions.InvalidTaskID(f"No task with ID {task_id} found in {self}")
 
+    @staticmethod
+    def _get_cancel_kw(msg: Union[str, None]) -> Dict[str, str]:
+        """
+        Returns a dictionary to unpack in a `Task.cancel()` method.
+
+        This method exists to ensure proper compatibility with older Python versions.
+        If `msg` is `None`, an empty dictionary is returned.
+        If `PYTHON_BEFORE_39` is `True` a warning is issued before returning an empty dictionary.
+        Otherwise the keyword dictionary contains the `msg` parameter.
+        """
+        if msg is None:
+            return {}
+        if PYTHON_BEFORE_39:
+            warnings.warn("Parameter `msg` is not available with Python versions before 3.9 and will be ignored.")
+            return {}
+        return {'msg': msg}
+
     def cancel(self, *task_ids: int, msg: str = None) -> None:
         """
         Cancels the tasks with the specified IDs.
@@ -378,8 +396,9 @@ class BaseTaskPool:
             `InvalidTaskID`: One of the `task_ids` is not known to the pool.
         """
         tasks = [self._get_running_task(task_id) for task_id in task_ids]
+        kw = self._get_cancel_kw(msg)
         for task in tasks:
-            task.cancel(msg=msg)
+            task.cancel(**kw)
 
     def _cancel_group_meta_tasks(self, group_name: str) -> None:
         """Cancels and forgets all meta tasks associated with the task group named `group_name`."""
@@ -392,7 +411,7 @@ class BaseTaskPool:
         self._meta_tasks_cancelled.update(meta_tasks)
         log.debug("%s cancelled and forgot meta tasks from group %s", str(self), group_name)
 
-    def _cancel_and_remove_all_from_group(self, group_name: str, group_reg: TaskGroupRegister, msg: str = None) -> None:
+    def _cancel_and_remove_all_from_group(self, group_name: str, group_reg: TaskGroupRegister, **cancel_kw) -> None:
         """
         Removes all tasks from the specified group and cancels them.
 
@@ -406,7 +425,7 @@ class BaseTaskPool:
         self._cancel_group_meta_tasks(group_name)
         while group_reg:
             try:
-                self._tasks_running[group_reg.pop()].cancel(msg=msg)
+                self._tasks_running[group_reg.pop()].cancel(**cancel_kw)
             except KeyError:
                 continue
         log.debug("%s cancelled tasks from group %s", str(self), group_name)
@@ -433,7 +452,8 @@ class BaseTaskPool:
             group_reg = self._task_groups.pop(group_name)
         except KeyError:
             raise exceptions.InvalidGroupName(f"No task group named {group_name} exists in this pool.")
-        self._cancel_and_remove_all_from_group(group_name, group_reg, msg=msg)
+        kw = self._get_cancel_kw(msg)
+        self._cancel_and_remove_all_from_group(group_name, group_reg, **kw)
         log.debug("%s forgot task group %s", str(self), group_name)
 
     def cancel_all(self, msg: str = None) -> None:
@@ -448,9 +468,10 @@ class BaseTaskPool:
             msg (optional): Passed to the `Task.cancel()` method of every task.
         """
         log.warning("%s cancelling all tasks!", str(self))
+        kw = self._get_cancel_kw(msg)
         while self._task_groups:
             group_name, group_reg = self._task_groups.popitem()
-            self._cancel_and_remove_all_from_group(group_name, group_reg, msg=msg)
+            self._cancel_and_remove_all_from_group(group_name, group_reg, **kw)
 
     def _pop_ended_meta_tasks(self) -> Set[Task]:
         """
