@@ -22,7 +22,7 @@ copyright = '2022 Daniil Fajnberg'
 author = 'Daniil Fajnberg'
 
 # The full version, including alpha/beta/rc tags
-release = '1.0.0-beta'
+release = '1.0.2'
 
 
 # -- General configuration ---------------------------------------------------
