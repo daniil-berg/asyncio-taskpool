@@ -625,7 +625,7 @@ class TaskPool(BaseTaskPool):
                 # This means there was probably something wrong with the function arguments.
                 log.exception("%s occurred in group '%s' while trying to create coroutine: %s(*%s, **%s)",
                               str(e.__class__.__name__), group_name, func.__name__, repr(args), repr(kwargs))
-                continue
+                continue  # TODO: Consider returning instead of continuing
             try:
                 await self._start_task(coroutine, group_name=group_name, end_callback=end_callback,
                                        cancel_callback=cancel_callback)
@@ -962,13 +962,24 @@ class SimpleTaskPool(BaseTaskPool):
 
     async def _start_num(self, num: int, group_name: str) -> None:
         """Starts `num` new tasks in group `group_name`."""
-        start_coroutines = (
-            self._start_task(self._func(*self._args, **self._kwargs), group_name=group_name,
-                             end_callback=self._end_callback, cancel_callback=self._cancel_callback)
-            for _ in range(num)
-        )
-        # TODO: Same deal as with the other meta tasks, provide proper cancellation handling!
-        await gather(*start_coroutines)
+        for i in range(num):
+            try:
+                coroutine = self._func(*self._args, **self._kwargs)
+            except Exception as e:
+                # This means there was probably something wrong with the function arguments.
+                log.exception("%s occurred in '%s' while trying to create coroutine: %s(*%s, **%s)",
+                              str(e.__class__.__name__), str(self), self._func.__name__,
+                              repr(self._args), repr(self._kwargs))
+                continue  # TODO: Consider returning instead of continuing
+            try:
+                await self._start_task(coroutine, group_name=group_name, end_callback=self._end_callback,
+                                       cancel_callback=self._cancel_callback)
+            except CancelledError:
+                # Either the task group or all tasks were cancelled, so this meta tasks is not supposed to spawn any
+                # more tasks and can return immediately.
+                log.debug("Cancelled group '%s' after %s out of %s tasks have been spawned", group_name, i, num)
+                coroutine.close()
+                return
 
     def start(self, num: int) -> str:
         """

@@ -790,18 +790,30 @@ class SimpleTaskPoolTestCase(CommonTestCase):
 
     @patch.object(pool.SimpleTaskPool, '_start_task')
     async def test__start_num(self, mock__start_task: AsyncMock):
-        fake_coroutine = object()
-        self.task_pool._func = MagicMock(return_value=fake_coroutine)
-        num = 3
         group_name = FOO + BAR + 'abc'
+        mock_awaitable1, mock_awaitable2 = object(), object()
+        self.task_pool._func = MagicMock(side_effect=[mock_awaitable1, Exception(), mock_awaitable2], __name__='func')
+        num = 3
         self.assertIsNone(await self.task_pool._start_num(num, group_name))
-        self.task_pool._func.assert_has_calls(num * [
-            call(*self.task_pool._args, **self.task_pool._kwargs)
-        ])
-        mock__start_task.assert_has_awaits(num * [
-            call(fake_coroutine, group_name=group_name, end_callback=self.task_pool._end_callback,
-                 cancel_callback=self.task_pool._cancel_callback)
-        ])
+        self.task_pool._func.assert_has_calls(num * [call(*self.task_pool._args, **self.task_pool._kwargs)])
+        call_kw = {
+            'group_name': group_name,
+            'end_callback': self.task_pool._end_callback,
+            'cancel_callback': self.task_pool._cancel_callback
+        }
+        mock__start_task.assert_has_awaits([call(mock_awaitable1, **call_kw), call(mock_awaitable2, **call_kw)])
+
+        self.task_pool._func.reset_mock(side_effect=True)
+        mock__start_task.reset_mock()
+
+        # Simulate cancellation while the second task is being started.
+        mock__start_task.side_effect = [None, CancelledError, None]
+        mock_coroutine_to_close = MagicMock()
+        self.task_pool._func.side_effect = [mock_awaitable1, mock_coroutine_to_close, 'never called']
+        self.assertIsNone(await self.task_pool._start_num(num, group_name))
+        self.task_pool._func.assert_has_calls(2 * [call(*self.task_pool._args, **self.task_pool._kwargs)])
+        mock__start_task.assert_has_awaits([call(mock_awaitable1, **call_kw), call(mock_coroutine_to_close, **call_kw)])
+        mock_coroutine_to_close.close.assert_called_once_with()
 
     @patch.object(pool, 'create_task')
     @patch.object(pool.SimpleTaskPool, '_start_num', new_callable=MagicMock())
