@@ -35,7 +35,7 @@ __all__ = []
 
 CLIENT_CLASS = 'client_class'
 UNIX, TCP = 'unix', 'tcp'
-SOCKET_PATH = 'path'
+SOCKET_PATH = 'socket_path'
 HOST, PORT = 'host', 'port'
 
 
