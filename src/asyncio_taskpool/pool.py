@@ -553,6 +553,12 @@ class BaseTaskPool:
         self._closed.set()
 
     async def until_closed(self) -> bool:
+        """
+        Waits until the pool has been closed. (This method itself does **not** close the pool, but blocks until then.)
+
+        Returns:
+            `True` once the pool is closed.
+        """
         return await self._closed.wait()
 
 
