@@ -31,7 +31,7 @@ import logging
 import warnings
 from asyncio.coroutines import iscoroutine, iscoroutinefunction
 from asyncio.exceptions import CancelledError
-from asyncio.locks import Semaphore
+from asyncio.locks import Event, Semaphore
 from asyncio.tasks import Task, create_task, gather
 from contextlib import suppress
 from math import inf
@@ -72,7 +72,7 @@ class BaseTaskPool:
 
         # Initialize flags; immutably set the name.
         self._locked: bool = False
-        self._closed: bool = False
+        self._closed: Event = Event()
         self._name: str = name
 
         # The following three dictionaries are the actual containers of the tasks controlled by the pool.
@@ -221,7 +221,7 @@ class BaseTaskPool:
             raise exceptions.NotCoroutine(f"Not awaitable: {awaitable}")
         if function and not iscoroutinefunction(function):
             raise exceptions.NotCoroutine(f"Not a coroutine function: {function}")
-        if self._closed:
+        if self._closed.is_set():
             raise exceptions.PoolIsClosed("You must use another pool")
         if self._locked and not ignore_lock:
             raise exceptions.PoolIsLocked("Cannot start new tasks")
@@ -550,9 +550,10 @@ class BaseTaskPool:
         self._tasks_ended.clear()
         self._tasks_cancelled.clear()
         self._tasks_running.clear()
-        self._closed = True
-        # TODO: Turn the `_closed` attribute into an `Event` and add something like a `until_closed` method that will
-        #       await it to allow blocking until a closing command comes from a server.
+        self._closed.set()
+
+    async def until_closed(self) -> bool:
+        return await self._closed.wait()
 
 
 class TaskPool(BaseTaskPool):

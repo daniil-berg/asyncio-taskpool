@@ -19,7 +19,7 @@ Unittests for the `asyncio_taskpool.pool` module.
 """
 
 from asyncio.exceptions import CancelledError
-from asyncio.locks import Semaphore
+from asyncio.locks import Event, Semaphore
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import PropertyMock, MagicMock, AsyncMock, patch, call
 from typing import Type
@@ -83,7 +83,8 @@ class BaseTaskPoolTestCase(CommonTestCase):
         self.assertEqual(0, self.task_pool._num_started)
 
         self.assertFalse(self.task_pool._locked)
-        self.assertFalse(self.task_pool._closed)
+        self.assertIsInstance(self.task_pool._closed, Event)
+        self.assertFalse(self.task_pool._closed.is_set())
         self.assertEqual(self.TEST_POOL_NAME, self.task_pool._name)
 
         self.assertDictEqual(EMPTY_DICT, self.task_pool._tasks_running)
@@ -162,7 +163,7 @@ class BaseTaskPoolTestCase(CommonTestCase):
             self.task_pool.get_group_ids(group_name, 'something else')
 
     async def test__check_start(self):
-        self.task_pool._closed = True
+        self.task_pool._closed.set()
         mock_coroutine, mock_coroutine_function = AsyncMock()(), AsyncMock()
         try:
             with self.assertRaises(AssertionError):
@@ -175,7 +176,7 @@ class BaseTaskPoolTestCase(CommonTestCase):
                 self.task_pool._check_start(awaitable=None, function=mock_coroutine)
             with self.assertRaises(exceptions.PoolIsClosed):
                 self.task_pool._check_start(awaitable=mock_coroutine, function=None)
-            self.task_pool._closed = False
+            self.task_pool._closed.clear()
             self.task_pool._locked = True
             with self.assertRaises(exceptions.PoolIsLocked):
                 self.task_pool._check_start(awaitable=mock_coroutine, function=None, ignore_lock=False)
@@ -461,7 +462,13 @@ class BaseTaskPoolTestCase(CommonTestCase):
         self.assertDictEqual(EMPTY_DICT, self.task_pool._tasks_ended)
         self.assertDictEqual(EMPTY_DICT, self.task_pool._tasks_cancelled)
         self.assertDictEqual(EMPTY_DICT, self.task_pool._tasks_running)
-        self.assertTrue(self.task_pool._closed)
+        self.assertTrue(self.task_pool._closed.is_set())
+
+    async def test_until_closed(self):
+        self.task_pool._closed = MagicMock(wait=AsyncMock(return_value=FOO))
+        output = await self.task_pool.until_closed()
+        self.assertEqual(FOO, output)
+        self.task_pool._closed.wait.assert_awaited_once_with()
 
 
 class TaskPoolTestCase(CommonTestCase):
