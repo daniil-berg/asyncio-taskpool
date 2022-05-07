@@ -26,7 +26,7 @@ from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
 from asyncio_taskpool.control import session
-from asyncio_taskpool.internals.constants import CLIENT_INFO, CMD, SESSION_MSG_BYTES
+from asyncio_taskpool.internals.constants import CLIENT_INFO, CMD
 from asyncio_taskpool.exceptions import HelpRequested
 from asyncio_taskpool.pool import SimpleTaskPool
 
@@ -102,8 +102,8 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         mock_parser_cls.return_value = mock_parser
         width = 5678
         msg = ' ' + json.dumps({CLIENT_INFO.TERMINAL_WIDTH: width, FOO: BAR}) + '  '
-        mock_read = AsyncMock(return_value=msg.encode())
-        self.mock_reader.read = mock_read
+        mock_readline = AsyncMock(return_value=msg.encode())
+        self.mock_reader.readline = mock_readline
         self.mock_writer.drain = AsyncMock()
         expected_parser_kwargs = {
             'stream': self.session._response_buffer,
@@ -117,7 +117,7 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         }
         self.assertIsNone(await self.session.client_handshake())
         self.assertEqual(mock_parser, self.session._parser)
-        mock_read.assert_awaited_once_with(SESSION_MSG_BYTES)
+        mock_readline.assert_awaited_once_with()
         mock_parser_cls.assert_called_once_with(**expected_parser_kwargs)
         mock_add_subparsers.assert_called_once_with(**expected_subparsers_kwargs)
         mock_add_class_commands.assert_called_once_with(self.mock_pool.__class__)
@@ -190,27 +190,27 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
     @patch.object(session.ControlSession, '_parse_command')
     async def test_listen(self, mock__parse_command: AsyncMock):
         def make_reader_return_empty():
-            self.mock_reader.read.return_value = b''
+            self.mock_reader.readline.return_value = b''
         self.mock_writer.drain = AsyncMock(side_effect=make_reader_return_empty)
         msg = "fascinating"
-        self.mock_reader.read = AsyncMock(return_value=f' {msg} '.encode())
+        self.mock_reader.readline = AsyncMock(return_value=f' {msg} '.encode())
         response = FOO + BAR + FOO
         self.session._response_buffer.write(response)
         self.assertIsNone(await self.session.listen())
-        self.mock_reader.read.assert_has_awaits([call(SESSION_MSG_BYTES), call(SESSION_MSG_BYTES)])
+        self.mock_reader.readline.assert_has_awaits([call(), call()])
         mock__parse_command.assert_awaited_once_with(msg)
         self.assertEqual('', self.session._response_buffer.getvalue())
         self.mock_writer.write.assert_called_once_with(response.encode())
         self.mock_writer.drain.assert_awaited_once_with()
 
-        self.mock_reader.read.reset_mock()
+        self.mock_reader.readline.reset_mock()
         mock__parse_command.reset_mock()
         self.mock_writer.write.reset_mock()
         self.mock_writer.drain.reset_mock()
 
         self.mock_server.is_serving = MagicMock(return_value=False)
         self.assertIsNone(await self.session.listen())
-        self.mock_reader.read.assert_not_awaited()
+        self.mock_reader.readline.assert_not_awaited()
         mock__parse_command.assert_not_awaited()
         self.mock_writer.write.assert_not_called()
         self.mock_writer.drain.assert_not_awaited()

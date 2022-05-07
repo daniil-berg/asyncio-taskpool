@@ -71,7 +71,7 @@ class ControlClientTestCase(IsolatedAsyncioTestCase):
         self.assertIsNone(await self.client._server_handshake(self.mock_reader, self.mock_writer))
         self.assertTrue(self.client._connected)
         mock__client_info.assert_called_once_with()
-        self.mock_write.assert_called_once_with(json.dumps(mock_info).encode())
+        self.mock_write.assert_has_calls([call(json.dumps(mock_info).encode()), call(b'\n')])
         self.mock_drain.assert_awaited_once_with()
         self.mock_read.assert_awaited_once_with(SESSION_MSG_BYTES)
         self.mock_print.assert_has_calls([
@@ -121,7 +121,7 @@ class ControlClientTestCase(IsolatedAsyncioTestCase):
         mock__get_command.return_value = cmd = FOO + BAR + ' 123'
         self.mock_drain.side_effect = err = ConnectionError()
         self.assertIsNone(await self.client._interact(self.mock_reader, self.mock_writer))
-        self.mock_write.assert_called_once_with(cmd.encode())
+        self.mock_write.assert_has_calls([call(cmd.encode()), call(b'\n')])
         self.mock_drain.assert_awaited_once_with()
         self.mock_read.assert_not_awaited()
         self.mock_print.assert_called_once_with(err, file=sys.stderr)
@@ -133,7 +133,7 @@ class ControlClientTestCase(IsolatedAsyncioTestCase):
         self.mock_print.reset_mock()
 
         self.assertIsNone(await self.client._interact(self.mock_reader, self.mock_writer))
-        self.mock_write.assert_called_once_with(cmd.encode())
+        self.mock_write.assert_has_calls([call(cmd.encode()), call(b'\n')])
         self.mock_drain.assert_awaited_once_with()
         self.mock_read.assert_awaited_once_with(SESSION_MSG_BYTES)
         self.mock_print.assert_called_once_with(FOO)
