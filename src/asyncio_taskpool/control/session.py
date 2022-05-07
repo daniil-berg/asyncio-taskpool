@@ -148,6 +148,7 @@ class ControlSession:
                                     metavar="(A command followed by '-h' or '--help' will show command-specific help.)")
         self._parser.add_class_commands(self._pool.__class__)
         self._writer.write(str(self._pool).encode())
+        self._writer.write(b'\n')
         await self._writer.drain()
 
     async def _parse_command(self, msg: str) -> None:
@@ -197,4 +198,5 @@ class ControlSession:
             self._response_buffer.seek(0)
             self._response_buffer.truncate()
             self._writer.write(response.encode())
+            self._writer.write(b'\n')
             await self._writer.drain()
