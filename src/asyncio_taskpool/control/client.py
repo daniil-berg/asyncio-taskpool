@@ -85,6 +85,7 @@ class ControlClient(ABC):
         """
         self._connected = True
         writer.write(json.dumps(self._client_info()).encode())
+        writer.write(b'\n')
         await writer.drain()
         print("Connected to", (await reader.read(SESSION_MSG_BYTES)).decode())
         print("Type '-h' to get help and usage instructions for all available commands.\n")
@@ -131,6 +132,7 @@ class ControlClient(ABC):
         try:
             # Send the command to the server.
             writer.write(cmd.encode())
+            writer.write(b'\n')
             await writer.drain()
         except ConnectionError as e:
             self._connected = False

@@ -765,9 +765,10 @@ class TaskPool(BaseTaskPool):
     def _map(self, group_name: str, num_concurrent: int, func: CoroutineFunc, arg_iter: ArgsT, arg_stars: int,
              end_callback: EndCB = None, cancel_callback: CancelCB = None) -> None:
         """
-        Creates tasks in the pool with arguments from the supplied iterable.
+        Creates coroutines with arguments from the supplied iterable and runs them as new tasks in the pool.
 
         Each coroutine looks like `func(arg)`, `func(*arg)`, or `func(**arg)`, `arg` being taken from `arg_iter`.
+        The method is a task-based equivalent of the `multiprocessing.pool.Pool.map` method.
 
         All the new tasks are added to the same task group.
 
@@ -819,10 +820,10 @@ class TaskPool(BaseTaskPool):
     def map(self, func: CoroutineFunc, arg_iter: ArgsT, num_concurrent: int = 1, group_name: str = None,
             end_callback: EndCB = None, cancel_callback: CancelCB = None) -> str:
         """
-        A task-based equivalent of the `multiprocessing.pool.Pool.map` method.
-
         Creates coroutines with arguments from the supplied iterable and runs them as new tasks in the pool.
-        Each coroutine looks like `func(arg)`, `arg` being an element taken from `arg_iter`.
+
+        Each coroutine looks like `func(arg)`, `arg` being an element taken from `arg_iter`. The method is a task-based
+        equivalent of the `multiprocessing.pool.Pool.map` method.
 
         All the new tasks are added to the same task group.
 
@@ -876,6 +877,8 @@ class TaskPool(BaseTaskPool):
     def starmap(self, func: CoroutineFunc, args_iter: Iterable[ArgsT], num_concurrent: int = 1, group_name: str = None,
                 end_callback: EndCB = None, cancel_callback: CancelCB = None) -> str:
         """
+        Creates coroutines with arguments from the supplied iterable and runs them as new tasks in the pool.
+
         Like :meth:`map` except that the elements of `args_iter` are expected to be iterables themselves to be unpacked
         as positional arguments to the function.
         Each coroutine then looks like `func(*args)`, `args` being an element from `args_iter`.
@@ -893,6 +896,8 @@ class TaskPool(BaseTaskPool):
     def doublestarmap(self, func: CoroutineFunc, kwargs_iter: Iterable[KwArgsT], num_concurrent: int = 1,
                       group_name: str = None, end_callback: EndCB = None, cancel_callback: CancelCB = None) -> str:
         """
+        Creates coroutines with arguments from the supplied iterable and runs them as new tasks in the pool.
+
         Like :meth:`map` except that the elements of `kwargs_iter` are expected to be iterables themselves to be
         unpacked as keyword-arguments to the function.
         Each coroutine then looks like `func(**kwargs)`, `kwargs` being an element from `kwargs_iter`.

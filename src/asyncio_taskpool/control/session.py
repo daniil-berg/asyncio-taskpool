@@ -32,7 +32,7 @@ from typing import Callable, Optional, Union, TYPE_CHECKING
 from .parser import ControlParser
 from ..exceptions import CommandError, HelpRequested, ParserError
 from ..pool import TaskPool, SimpleTaskPool
-from ..internals.constants import CLIENT_INFO, CMD, CMD_OK, SESSION_MSG_BYTES
+from ..internals.constants import CLIENT_INFO, CMD, CMD_OK
 from ..internals.helpers import return_or_exception
 
 if TYPE_CHECKING:
@@ -134,7 +134,8 @@ class ControlSession:
         Client info is retrieved, server info is sent back, and the
         :class:`ControlParser <asyncio_taskpool.control.parser.ControlParser>` is set up.
         """
-        client_info = json.loads((await self._reader.read(SESSION_MSG_BYTES)).decode().strip())
+        msg = (await self._reader.readline()).decode().strip()
+        client_info = json.loads(msg)
         log.debug("%s connected", self._client_class_name)
         parser_kwargs = {
             'stream': self._response_buffer,
@@ -187,7 +188,7 @@ class ControlSession:
         It will obviously block indefinitely.
         """
         while self._control_server.is_serving():
-            msg = (await self._reader.read(SESSION_MSG_BYTES)).decode().strip()
+            msg = (await self._reader.readline()).decode().strip()
             if not msg:
                 log.debug("%s disconnected", self._client_class_name)
                 break
