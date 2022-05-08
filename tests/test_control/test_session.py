@@ -74,7 +74,7 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         mock_return_or_exception.assert_awaited_once_with(
             method, self.mock_pool, test_arg1, test_arg2, *test_var_args, **test_rest
         )
-        self.mock_writer.write.assert_called_once_with(session.CMD_OK)
+        self.assertEqual(session.CMD_OK.decode(), self.session._response_buffer.getvalue())
 
     @patch.object(session, 'return_or_exception')
     async def test__exec_property_and_respond(self, mock_return_or_exception: AsyncMock):
@@ -85,15 +85,16 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         mock_return_or_exception.return_value = None
         self.assertIsNone(await self.session._exec_property_and_respond(prop, **kwargs))
         mock_return_or_exception.assert_awaited_once_with(prop_set, self.mock_pool, **kwargs)
-        self.mock_writer.write.assert_called_once_with(session.CMD_OK)
+        self.assertEqual(session.CMD_OK.decode(), self.session._response_buffer.getvalue())
 
         mock_return_or_exception.reset_mock()
-        self.mock_writer.write.reset_mock()
+        self.session._response_buffer.seek(0)
+        self.session._response_buffer.truncate()
 
         mock_return_or_exception.return_value = val = 420.69
         self.assertIsNone(await self.session._exec_property_and_respond(prop))
         mock_return_or_exception.assert_awaited_once_with(prop_get, self.mock_pool)
-        self.mock_writer.write.assert_called_once_with(str(val).encode())
+        self.assertEqual(str(val), self.session._response_buffer.getvalue())
 
     @patch.object(session, 'ControlParser')
     async def test_client_handshake(self, mock_parser_cls: MagicMock):
@@ -121,7 +122,7 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         mock_parser_cls.assert_called_once_with(**expected_parser_kwargs)
         mock_add_subparsers.assert_called_once_with(**expected_subparsers_kwargs)
         mock_add_class_commands.assert_called_once_with(self.mock_pool.__class__)
-        self.mock_writer.write.assert_has_calls([call(str(self.mock_pool).encode()), call(b'\n')])
+        self.mock_writer.write.assert_called_once_with(str(self.mock_pool).encode() + b'\n')
         self.mock_writer.drain.assert_awaited_once_with()
 
     @patch.object(session.ControlSession, '_exec_property_and_respond')
@@ -200,7 +201,7 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         self.mock_reader.readline.assert_has_awaits([call(), call()])
         mock__parse_command.assert_awaited_once_with(msg)
         self.assertEqual('', self.session._response_buffer.getvalue())
-        self.mock_writer.write.assert_has_calls([call(response.encode()), call(b'\n')])
+        self.mock_writer.write.assert_called_once_with(response.encode() + b'\n')
         self.mock_writer.drain.assert_awaited_once_with()
 
         self.mock_reader.readline.reset_mock()
