@@ -103,7 +103,7 @@ class ControlSession:
             elif param.kind == param.VAR_POSITIONAL:
                 var_pos = kwargs.pop(param.name)
         output = await return_or_exception(method, *normal_pos, *var_pos, **kwargs)
-        self._writer.write(CMD_OK if output is None else str(output).encode())
+        self._response_buffer.write(CMD_OK.decode() if output is None else str(output))
 
     async def _exec_property_and_respond(self, prop: property, **kwargs) -> None:
         """
@@ -122,10 +122,10 @@ class ControlSession:
         if kwargs:
             log.debug("%s sets %s.%s", self._client_class_name, self._pool.__class__.__name__, prop.fset.__name__)
             await return_or_exception(prop.fset, self._pool, **kwargs)
-            self._writer.write(CMD_OK)
+            self._response_buffer.write(CMD_OK.decode())
         else:
             log.debug("%s gets %s.%s", self._client_class_name, self._pool.__class__.__name__, prop.fget.__name__)
-            self._writer.write(str(await return_or_exception(prop.fget, self._pool)).encode())
+            self._response_buffer.write(str(await return_or_exception(prop.fget, self._pool)))
 
     async def client_handshake(self) -> None:
         """
@@ -147,8 +147,7 @@ class ControlSession:
         self._parser.add_subparsers(title="Commands",
                                     metavar="(A command followed by '-h' or '--help' will show command-specific help.)")
         self._parser.add_class_commands(self._pool.__class__)
-        self._writer.write(str(self._pool).encode())
-        self._writer.write(b'\n')
+        self._writer.write(str(self._pool).encode() + b'\n')
         await self._writer.drain()
 
     async def _parse_command(self, msg: str) -> None:
@@ -194,9 +193,8 @@ class ControlSession:
                 log.debug("%s disconnected", self._client_class_name)
                 break
             await self._parse_command(msg)
-            response = self._response_buffer.getvalue()
+            response = self._response_buffer.getvalue() + "\n"
             self._response_buffer.seek(0)
             self._response_buffer.truncate()
             self._writer.write(response.encode())
-            self._writer.write(b'\n')
             await self._writer.drain()
