@@ -36,7 +36,7 @@ jobs:
 
     - name: Run tests for Python 3.10 and save coverage
       if: ${{ matrix.python-version == '3.10' }}
-      run: echo "coverage=$(./coverage.sh)" >> $GITHUB_ENV
+      run: echo "coverage=$(./scripts/cov.sh)" >> $GITHUB_ENV
     
     outputs:
       coverage: ${{ env.coverage }}

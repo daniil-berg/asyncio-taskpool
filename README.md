@@ -78,7 +78,7 @@ Python Version 3.8+, tested on Linux
 
 ## Testing
 
-Install [`coverage`](https://coverage.readthedocs.io/en/latest/) with `pip`, then execute the [`./coverage.sh`](coverage.sh) shell script to run all unit tests and save the coverage report.
+Install [`coverage`](https://coverage.readthedocs.io/en/latest/) with `pip`, then execute the [`cov.sh`](scripts/cov.sh) shell script to run all unit tests and save the coverage report.
 
 ## License
 
