@@ -1,13 +1,25 @@
 # Python virtual environment:
-/.venv/
+/.venv*/
+/venv*/
+/.env*/
+/env*/
+
 # IDE settings:
 /.idea/
 /.vscode/
+
 # Distribution / build files:
 *.egg-info/
 /dist/
 /docs/build/
-# Python cache:
+/site/
+
+# Python cache / compiled files:
 __pycache__/
+*.py[cod]
+
 # Testing:
-.coverage
+/.coverage
+
+# Miscellaneous cache:
+.cache/
