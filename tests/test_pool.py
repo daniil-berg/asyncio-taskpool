@@ -476,7 +476,8 @@ class TaskPoolTestCase(CommonTestCase):
     task_pool: pool.TaskPool
 
     def test__generate_group_name(self):
-        prefix, func = 'x y z', AsyncMock(__name__=BAR)
+        prefix, func = 'x y z', AsyncMock()
+        func.__name__ = BAR
         base_name = f'{prefix}-{BAR}-group'
         self.task_pool._task_groups = {
             f'{base_name}-0': MagicMock(),
