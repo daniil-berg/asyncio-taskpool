@@ -56,9 +56,9 @@ jobs:
 
       - name: Count lines of code/comments
         run: |
-          echo "cloc_code=$(./cloc.sh -c src/)" >> $GITHUB_ENV
-          echo "cloc_comments=$(./cloc.sh -m src/)" >> $GITHUB_ENV
-          echo "cloc_commentpercent=$(./cloc.sh -p src/)" >> $GITHUB_ENV
+          echo "cloc_code=$(./scripts/cloc.sh -c src/)" >> $GITHUB_ENV
+          echo "cloc_comments=$(./scripts/cloc.sh -m src/)" >> $GITHUB_ENV
+          echo "cloc_commentpercent=$(./scripts/cloc.sh -p src/)" >> $GITHUB_ENV
 
       - name: Create badge for lines of code
         uses: Schneegans/dynamic-badges-action@v1.2.0
