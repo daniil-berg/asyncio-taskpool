@@ -1,5 +1,5 @@
 """
-Definition of the :class:`ControlParser` used in a 
+Definition of the :class:`ControlParser` used in a
 :class:`ControlSession <asyncio_taskpool.control.session.ControlSession>`.
 
 It should not be considered part of the public API.
@@ -228,8 +228,10 @@ class ControlParser(ArgumentParser):
         subparser: ControlParser = self._commands.add_parser(**subparser_kwargs)
         if prop.fset is not None:
             _, param = signature(prop.fset).parameters.values()
-            setter_arg_help = (f"If provided: {get_first_doc_line(prop.fset)} "
-                               f"If omitted: {getter_help}")
+            setter_arg_help = (
+                f"If provided: {get_first_doc_line(prop.fset)} "
+                f"If omitted: {getter_help}"
+            )
             subparser.add_function_arg(
                 param, nargs="?", default=SUPPRESS, help=setter_arg_help
             )
@@ -415,13 +417,17 @@ def _get_arg_type_wrapper(cls: Type[Any]) -> Callable[[Any], Any]:
         try:
             return cls(arg)
         except (ArgumentTypeError, TypeError, ValueError):
-            raise  # handled properly by the parser and propagated to the client anyway
+            raise  # handled properly by the parser and propagated to the client
         except Exception as e:
-            text = f"{e.__class__.__name__} occurred in parser trying to convert type: {cls.__name__}({repr(arg)})"
+            text = (
+                f"{e.__class__.__name__} occurred in parser trying to "
+                f"convert type: {cls.__name__}({arg!r})"
+            )
             log.exception(text)
-            raise ArgumentTypeError(text)  # propagate to the client
+            raise ArgumentTypeError(text) from e  # propagate to the client
 
-    # Copy the name of the class to maintain useful help messages when incorrect arguments are passed.
+    # Copy the name of the class to maintain useful help messages when
+    # incorrect arguments are passed.
     wrapper.__name__ = cls.__name__
     return wrapper
 
@@ -438,11 +444,14 @@ def _get_type_from_annotation(annotation: Any) -> Callable[[Any], Any]:
     `Iterable`- or args/kwargs-type annotations use `ast.literal_eval`.
     Others pass unchanged (but still wrapped with `_get_arg_type_wrapper`).
     """
-    if any(annotation is t for t in {CoroutineFunc, EndCB, CancelCB}):
+    if any(annotation is t for t in (CoroutineFunc, EndCB, CancelCB)):
         annotation = resolve_dotted_path
     if any(
         annotation is t
-        for t in {ArgsT, KwArgsT, Iterable[ArgsT], Iterable[KwArgsT]}
+        for t in (ArgsT, KwArgsT, Iterable[ArgsT], Iterable[KwArgsT])
     ):
         annotation = literal_eval
     return _get_arg_type_wrapper(annotation)
+
+
+# ruff: noqa: A003 (Class attribute {} is shadowing a Python builtin)

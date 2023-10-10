@@ -135,18 +135,22 @@ ignore = [
     "D212",  # Multi-line docstring summary should start at the first line -> ugly, D212 is better
     "D401",  # First line of docstring should be in imperative mood -> no, it shouldn't
     "D407",  # Missing dashed underline after section -> different docstring style
+    "N818",  # Exception name {name} should be named with an Error suffix -> no, it shouldn't
 ]
 
 [tool.ruff.per-file-ignores]
 "src/**/__init__.py" = [
+    "A001",  # Variable {name} is shadowing a Python builtin
     "D104",  # Missing docstring in public package
     "F401",  # {...} imported but unused
 ]
 "tests/*.py" = [
-    "D100",  # Missing docstring in public module
-    "D101",  # Missing docstring in public class
-    "D102",  # Missing docstring in public method
-    "D104",  # Missing docstring in public package
+    "D100",     # Missing docstring in public module
+    "D101",     # Missing docstring in public class
+    "D102",     # Missing docstring in public method
+    "D104",     # Missing docstring in public package
+    "PLR0913",  # Too many arguments to function call
+    "PLR0915",  # Too many statements
 ]
 
 ####################

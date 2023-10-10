@@ -58,7 +58,6 @@ class TaskGroupRegister(MutableSet[int]):
     async def __aenter__(self) -> None:
         """Acquires the internal lock."""
         await self._lock.acquire()
-        return None
 
     async def __aexit__(
         self,

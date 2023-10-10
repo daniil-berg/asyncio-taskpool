@@ -142,7 +142,7 @@ def star_function(
         return function(arg)
     if arg_stars == 1:
         return function(*arg)
-    if arg_stars == 2:
+    if arg_stars == 2:  # noqa: PLR2004
         return function(**arg)
     raise ValueError(
         f"Invalid argument arg_stars={arg_stars}; must be 0, 1, or 2."
@@ -231,6 +231,6 @@ class ClassMethodWorkaround:
 
 if not TYPE_CHECKING and PYTHON_BEFORE_39:
     # Starting with Python 3.9, this is thankfully no longer necessary.
-    classmethod = ClassMethodWorkaround
+    classmethod = ClassMethodWorkaround  # noqa
 else:
-    classmethod = builtins.classmethod
+    classmethod = builtins.classmethod  # noqa

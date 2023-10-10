@@ -65,12 +65,12 @@ class ControlParserTestCase(TestCase):
         )
         self.assertTrue(issubclass(cls, MockBaseClass))
         instance = cls("prog")
-        self.assertEqual(terminal_width, getattr(instance, "_width"))
+        self.assertEqual(terminal_width, instance._width)
 
         cls = parser.ControlParser.help_formatter_factory(terminal_width)
         self.assertTrue(issubclass(cls, ArgumentDefaultsHelpFormatter))
         instance = cls("prog")
-        self.assertEqual(terminal_width, getattr(instance, "_width"))
+        self.assertEqual(terminal_width, instance._width)
 
     def test_init(self) -> None:
         self.assertIsInstance(self.parser, ArgumentParser)
@@ -79,9 +79,7 @@ class ControlParserTestCase(TestCase):
         self.mock_help_formatter_factory.assert_called_once_with(
             self.terminal_width, FOO
         )
-        self.assertEqual(
-            RawTextHelpFormatter, getattr(self.parser, "formatter_class")
-        )
+        self.assertEqual(RawTextHelpFormatter, self.parser.formatter_class)
         self.assertSetEqual(set(), self.parser._flags)
         self.assertIsNone(self.parser._commands)
 

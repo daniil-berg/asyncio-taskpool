@@ -81,9 +81,9 @@ class HelpersTestCase(IsolatedAsyncioTestCase):
         self.assertIsNone(helpers.get_first_doc_line(lambda: "foo"))
         expected_output = "foo bar baz"
         mock_obj = MagicMock(
-            __doc__=f"""{expected_output} 
+            __doc__=f"""{expected_output}
         something else
-        
+
         even more
         """
         )

@@ -4,7 +4,7 @@ Unittests for the `asyncio_taskpool.pool` module.
 
 from asyncio.exceptions import CancelledError
 from asyncio.locks import Event, Semaphore
-from typing import Any, Dict, List, Set, Type
+from typing import Any, ClassVar, Dict, List, Set, Type
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, call, patch
 
@@ -1089,7 +1089,7 @@ class SimpleTaskPoolTestCase(CommonTestCase):
 
     TEST_POOL_FUNC = AsyncMock(__name__=FOO)
     TEST_POOL_ARGS = (FOO, BAR)
-    TEST_POOL_KWARGS = {"a": 1, "b": 2}
+    TEST_POOL_KWARGS: ClassVar[Dict[str, int]] = {"a": 1, "b": 2}
     TEST_POOL_END_CB = MagicMock()
     TEST_POOL_CANCEL_CB = MagicMock()
 

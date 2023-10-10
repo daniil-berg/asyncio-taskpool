@@ -40,7 +40,7 @@ class ControlServer(ABC, Generic[ClientT]):
 
     @classmethod  # type: ignore[misc]
     @property
-    def client_class_name(cls) -> str:
+    def client_class_name(cls) -> str:  # noqa
         """Returns the name of the matching control client class."""
         return cls._client_class.__name__
 

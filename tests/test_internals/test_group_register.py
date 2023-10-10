@@ -26,7 +26,7 @@ class TaskGroupRegisterTestCase(IsolatedAsyncioTestCase):
         self.reg._ids = {1, 2, 3}
         for i in self.reg._ids:
             self.assertTrue(i in self.reg)
-        self.assertFalse(4 in self.reg)
+        self.assertFalse(4 in self.reg)  # noqa: PLR2004
 
     @patch.object(group_register, "iter", return_value=FOO)
     def test___iter__(self, mock_iter: MagicMock) -> None:

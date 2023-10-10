@@ -26,6 +26,7 @@ from typing import (
     Any,
     Awaitable,
     Callable,
+    ClassVar,
     Coroutine,
     Dict,
     Iterable,
@@ -34,7 +35,6 @@ from typing import (
     Set,
     TypeVar,
     Union,
-    cast,
 )
 from typing_extensions import ParamSpec
 
@@ -63,10 +63,10 @@ log = logging.getLogger(__name__)
 class BaseTaskPool:
     """The base class for task pools. Not intended to be used directly."""
 
-    _pools: List["BaseTaskPool"] = []
+    _pools: ClassVar[List[BaseTaskPool]] = []
 
     @classmethod
-    def _add_pool(cls, pool: "BaseTaskPool") -> int:
+    def _add_pool(cls, pool: BaseTaskPool) -> int:
         """Adds a `pool` to the general list of pools and returns it's index."""
         cls._pools.append(pool)
         return len(cls._pools) - 1
@@ -104,7 +104,7 @@ class BaseTaskPool:
     @property
     def pool_size(self) -> int:
         """Maximum number of concurrently running tasks allowed in the pool."""
-        return cast(int, getattr(self._enough_room, "_value"))
+        return self._enough_room._value
 
     @pool_size.setter
     def pool_size(self, value: int) -> None:
@@ -207,7 +207,7 @@ class BaseTaskPool:
             except KeyError:
                 raise InvalidGroupName(
                     f"No task group named {name} exists in this pool."
-                )
+                ) from None
         return ids
 
     def _check_start(
@@ -420,12 +420,14 @@ class BaseTaskPool:
             if self._tasks_cancelled.get(task_id):
                 raise AlreadyCancelled(
                     f"{self._task_name(task_id)} has been cancelled"
-                )
+                ) from None
             if self._tasks_ended.get(task_id):
                 raise AlreadyEnded(
                     f"{self._task_name(task_id)} has finished running"
-                )
-            raise InvalidTaskID(f"No task with ID {task_id} found in {self}")
+                ) from None
+            raise InvalidTaskID(
+                f"No task with ID {task_id} found in {self}"
+            ) from None
 
     @staticmethod
     def _get_cancel_kw(msg: str | None) -> Dict[str, str]:
@@ -443,7 +445,8 @@ class BaseTaskPool:
         if PYTHON_BEFORE_39:
             warnings.warn(
                 "Parameter `msg` is not available with Python versions "
-                "before 3.9 and will be ignored."
+                "before 3.9 and will be ignored.",
+                stacklevel=3,
             )
             return {}
         return {"msg": msg}
@@ -549,7 +552,7 @@ class BaseTaskPool:
         except KeyError:
             raise InvalidGroupName(
                 f"No task group named {group_name} exists in this pool."
-            )
+            ) from None
         kw = self._get_cancel_kw(msg)
         self._cancel_and_remove_all_from_group(group_name, group_reg, **kw)
         log.debug("%s forgot task group %s", str(self), group_name)
@@ -1086,7 +1089,7 @@ class TaskPool(BaseTaskPool):
             )
         )
 
-    def map(
+    def map(  # noqa: A003 (Class attribute {} is shadowing a Python builtin)
         self,
         func: CoroutineFunc,
         arg_iter: ArgsT,
@@ -1412,3 +1415,6 @@ class SimpleTaskPool(BaseTaskPool):
 
 
 AnyTaskPoolT = Union[TaskPool, SimpleTaskPool]
+
+
+# ruff: noqa: PLR0913 (Too many arguments to function call)

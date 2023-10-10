@@ -19,6 +19,6 @@ CMD = "command"
 CMD_OK = b"ok"
 
 
-class CLIENT_INFO:
+class CLIENT_INFO:  # noqa
     __slots__ = ()
     TERMINAL_WIDTH = "terminal_width"
