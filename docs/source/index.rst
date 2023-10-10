@@ -10,7 +10,7 @@
 .. You should have received a copy of the GNU Lesser General Public License along with asyncio-taskpool.
    If not, see <https://www.gnu.org/licenses/>.
 
-.. Copyright © 2022 Daniil Fajnberg
+.. Copyright © 2023 Daniil Fajnberg
 
 
 Welcome to the asyncio-taskpool documentation!

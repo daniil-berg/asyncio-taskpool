@@ -1,5 +1,5 @@
 __author__ = "Daniil Fajnberg"
-__copyright__ = "Copyright © 2022 Daniil Fajnberg"
+__copyright__ = "Copyright © 2023 Daniil Fajnberg"
 __license__ = """GNU LGPLv3.0
 
 This file is part of asyncio-taskpool.
