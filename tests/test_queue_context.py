@@ -15,10 +15,11 @@ class QueueTestCase(IsolatedAsyncioTestCase):
         queue._unfinished_tasks = 1000  # type: ignore[attr-defined]
         queue.item_processed()
         self.assertEqual(999, queue._unfinished_tasks)  # type: ignore[attr-defined]
-    @patch.object(Queue, 'item_processed')
+
+    @patch.object(Queue, "item_processed")
     async def test_contextmanager(self, mock_item_processed: MagicMock) -> None:
         queue: Queue[Any] = Queue()
-        item = 'foo'
+        item = "foo"
         queue.put_nowait(item)
         async with queue as item_from_queue:
             self.assertEqual(item, item_from_queue)

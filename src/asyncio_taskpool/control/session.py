@@ -5,25 +5,26 @@ It should not be considered part of the public API.
 """
 
 from __future__ import annotations
-import logging
+
 import json
+import logging
 from argparse import ArgumentError
 from asyncio.streams import StreamReader, StreamWriter
 from inspect import isfunction, signature
 from io import StringIO
-from typing import Any, Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable
 
-from .parser import ControlParser
 from ..exceptions import CommandError, HelpRequested, ParserError
-from ..pool import TaskPool, SimpleTaskPool
 from ..internals.constants import CLIENT_INFO, CMD, CMD_OK
 from ..internals.helpers import return_or_exception
+from ..pool import SimpleTaskPool, TaskPool
+from .parser import ControlParser
 
 if TYPE_CHECKING:
-    from .server import ControlServer, ClientT
+    from .server import ClientT, ControlServer
 
 
-__all__ = ['ControlSession']
+__all__ = ["ControlSession"]
 
 
 log = logging.getLogger(__name__)
@@ -37,7 +38,12 @@ class ControlSession:
     A subclass of the standard :class:`argparse.ArgumentParser` is used to handle the input read from the stream.
     """
 
-    def __init__(self, server: 'ControlServer[ClientT]', reader: StreamReader, writer: StreamWriter) -> None:
+    def __init__(
+        self,
+        server: "ControlServer[ClientT]",
+        reader: StreamReader,
+        writer: StreamWriter,
+    ) -> None:
         """
         Connection to the control server should already been established.
 
@@ -53,7 +59,7 @@ class ControlSession:
             writer:
                 The `asyncio.StreamWriter` created when a client connected to the server.
         """
-        self._control_server: 'ControlServer[ClientT]' = server
+        self._control_server: "ControlServer[ClientT]" = server
         self._pool: TaskPool | SimpleTaskPool = server.pool
         self._client_class_name = server.client_class_name
         self._reader: StreamReader = reader
@@ -61,7 +67,9 @@ class ControlSession:
         self._parser: ControlParser | None = None
         self._response_buffer: StringIO = StringIO()
 
-    async def _exec_method_and_respond(self, method: Callable[..., Any], **kwargs: Any) -> None:
+    async def _exec_method_and_respond(
+        self, method: Callable[..., Any], **kwargs: Any
+    ) -> None:
         """
         Takes a pool method reference, executes it, and writes a response accordingly.
 
@@ -77,19 +85,33 @@ class ControlSession:
                 Must correspond to the arguments expected by the `method`.
                 Correctly unpacks arbitrary-length positional and keyword-arguments.
         """
-        log.debug("%s calls %s.%s", self._client_class_name, self._pool.__class__.__name__, method.__name__)
+        log.debug(
+            "%s calls %s.%s",
+            self._client_class_name,
+            self._pool.__class__.__name__,
+            method.__name__,
+        )
         normal_pos, var_pos = [], []
         for param in signature(method).parameters.values():
-            if param.name == 'self':
+            if param.name == "self":
                 normal_pos.append(self._pool)
-            elif param.kind in (param.POSITIONAL_OR_KEYWORD, param.POSITIONAL_ONLY):
+            elif param.kind in (
+                param.POSITIONAL_OR_KEYWORD,
+                param.POSITIONAL_ONLY,
+            ):
                 normal_pos.append(kwargs.pop(param.name))
             elif param.kind == param.VAR_POSITIONAL:
                 var_pos = kwargs.pop(param.name)
-        output = await return_or_exception(method, *normal_pos, *var_pos, **kwargs)
-        self._response_buffer.write(CMD_OK.decode() if output is None else str(output))
+        output = await return_or_exception(
+            method, *normal_pos, *var_pos, **kwargs
+        )
+        self._response_buffer.write(
+            CMD_OK.decode() if output is None else str(output)
+        )
 
-    async def _exec_property_and_respond(self, prop: property, **kwargs: Any) -> None:
+    async def _exec_property_and_respond(
+        self, prop: property, **kwargs: Any
+    ) -> None:
         """
         Takes a pool property reference, executes its setter or getter, and writes a response accordingly.
 
@@ -105,13 +127,25 @@ class ControlSession:
         """
         if kwargs:
             assert prop.fset is not None, "Property has not setter"
-            log.debug("%s sets %s.%s", self._client_class_name, self._pool.__class__.__name__, prop.fset.__name__)
+            log.debug(
+                "%s sets %s.%s",
+                self._client_class_name,
+                self._pool.__class__.__name__,
+                prop.fset.__name__,
+            )
             await return_or_exception(prop.fset, self._pool, **kwargs)  # type: ignore[call-arg]
             self._response_buffer.write(CMD_OK.decode())
         else:
             assert prop.fget is not None, "Property has not getter"
-            log.debug("%s gets %s.%s", self._client_class_name, self._pool.__class__.__name__, prop.fget.__name__)
-            self._response_buffer.write(str(await return_or_exception(prop.fget, self._pool)))
+            log.debug(
+                "%s gets %s.%s",
+                self._client_class_name,
+                self._pool.__class__.__name__,
+                prop.fget.__name__,
+            )
+            self._response_buffer.write(
+                str(await return_or_exception(prop.fget, self._pool))
+            )
 
     async def client_handshake(self) -> None:
         """
@@ -124,16 +158,18 @@ class ControlSession:
         client_info = json.loads(msg)
         log.debug("%s connected", self._client_class_name)
         parser_kwargs = {
-            'stream': self._response_buffer,
+            "stream": self._response_buffer,
             CLIENT_INFO.TERMINAL_WIDTH: client_info[CLIENT_INFO.TERMINAL_WIDTH],
-            'prog': '',
-            'usage': f'[-h] [{CMD}] ...'
+            "prog": "",
+            "usage": f"[-h] [{CMD}] ...",
         }
         self._parser = ControlParser(**parser_kwargs)
-        self._parser.add_subparsers(title="Commands",
-                                    metavar="(A command followed by '-h' or '--help' will show command-specific help.)")
+        self._parser.add_subparsers(
+            title="Commands",
+            metavar="(A command followed by '-h' or '--help' will show command-specific help.)",
+        )
         self._parser.add_class_commands(self._pool.__class__)
-        self._writer.write(str(self._pool).encode() + b'\n')
+        self._writer.write(str(self._pool).encode() + b"\n")
         await self._writer.drain()
 
     async def _parse_command(self, msg: str) -> None:
@@ -149,7 +185,7 @@ class ControlSession:
         """
         assert self._parser is not None, "Parser not initialized yet"
         try:
-            kwargs = vars(self._parser.parse_args(msg.split(' ')))
+            kwargs = vars(self._parser.parse_args(msg.split(" ")))
         except ArgumentError as e:
             log.debug("%s got an ArgumentError", self._client_class_name)
             self._response_buffer.write(str(e))
@@ -163,7 +199,9 @@ class ControlSession:
         elif isinstance(command, property):
             await self._exec_property_and_respond(command, **kwargs)
         else:
-            self._response_buffer.write(str(CommandError(f"Unknown command object: {command}")))
+            self._response_buffer.write(
+                str(CommandError(f"Unknown command object: {command}"))
+            )
 
     async def listen(self) -> None:
         """

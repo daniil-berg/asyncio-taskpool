@@ -7,10 +7,19 @@ This module should **not** be considered part of the public API.
 
 from asyncio.streams import StreamReader, StreamWriter
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Coroutine, Iterable, Mapping, Tuple, TypeVar, Union
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Coroutine,
+    Iterable,
+    Mapping,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
-
-T = TypeVar('T')
+T = TypeVar("T")
 
 ArgsT = Iterable[Any]
 KwArgsT = Mapping[str, Any]

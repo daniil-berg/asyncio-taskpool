@@ -1,2 +1,2 @@
-from .server import TCPControlServer, UnixControlServer
 from .client import TCPControlClient, UnixControlClient
+from .server import TCPControlServer, UnixControlServer

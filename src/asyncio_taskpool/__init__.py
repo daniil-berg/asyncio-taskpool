@@ -21,4 +21,4 @@ Top-level convenience imports.
 """
 
 
-from .pool import TaskPool, SimpleTaskPool
+from .pool import SimpleTaskPool, TaskPool

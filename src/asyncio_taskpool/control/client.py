@@ -3,6 +3,7 @@ Classes of control clients for a simply interface to a task pool control server.
 """
 
 from __future__ import annotations
+
 import json
 import shutil
 import sys
@@ -14,16 +15,15 @@ from typing import Any
 from ..internals.constants import CLIENT_INFO, SESSION_MSG_BYTES
 from ..internals.types import ClientConnT, PathT
 
-
 __all__ = [
-    'ControlClient',
-    'TCPControlClient',
-    'UnixControlClient',
-    'CLIENT_EXIT'
+    "ControlClient",
+    "TCPControlClient",
+    "UnixControlClient",
+    "CLIENT_EXIT",
 ]
 
 
-CLIENT_EXIT = 'exit'
+CLIENT_EXIT = "exit"
 
 
 class ControlClient(ABC):
@@ -57,7 +57,9 @@ class ControlClient(ABC):
         self._conn_kwargs = conn_kwargs
         self._connected: bool = False
 
-    async def _server_handshake(self, reader: StreamReader, writer: StreamWriter) -> None:
+    async def _server_handshake(
+        self, reader: StreamReader, writer: StreamWriter
+    ) -> None:
         """
         Performs the first interaction with the server providing it with the necessary client information.
 
@@ -69,10 +71,12 @@ class ControlClient(ABC):
         """
         self._connected = True
         writer.write(json.dumps(self._client_info()).encode())
-        writer.write(b'\n')
+        writer.write(b"\n")
         await writer.drain()
         print("Connected to", (await reader.read(SESSION_MSG_BYTES)).decode())
-        print("Type '-h' to get help and usage instructions for all available commands.\n")
+        print(
+            "Type '-h' to get help and usage instructions for all available commands.\n"
+        )
 
     def _get_command(self, writer: StreamWriter) -> str | None:
         """
@@ -88,9 +92,13 @@ class ControlClient(ABC):
         """
         try:
             cmd = input("> ").strip().lower()
-        except EOFError:  # Ctrl+D shall be equivalent to the :const:`CLIENT_EXIT` command.
+        except (
+            EOFError
+        ):  # Ctrl+D shall be equivalent to the :const:`CLIENT_EXIT` command.
             cmd = CLIENT_EXIT
-        except KeyboardInterrupt:  # Ctrl+C shall simply reset to the input prompt.
+        except (
+            KeyboardInterrupt
+        ):  # Ctrl+C shall simply reset to the input prompt.
             print()
             return None
         if cmd == CLIENT_EXIT:
@@ -99,7 +107,9 @@ class ControlClient(ABC):
             return None
         return cmd or None  # will be None if `cmd` is an empty string
 
-    async def _interact(self, reader: StreamReader, writer: StreamWriter) -> None:
+    async def _interact(
+        self, reader: StreamReader, writer: StreamWriter
+    ) -> None:
         """
         Reacts to the user's command, potentially performing a back-and-forth interaction with the server.
 
@@ -116,7 +126,7 @@ class ControlClient(ABC):
         try:
             # Send the command to the server.
             writer.write(cmd.encode())
-            writer.write(b'\n')
+            writer.write(b"\n")
             await writer.drain()
         except ConnectionError as e:
             self._connected = False
@@ -175,6 +185,7 @@ class UnixControlClient(ControlClient):
     def __init__(self, socket_path: PathT, **conn_kwargs: Any) -> None:
         """`socket_path` is expected as a non-optional connection argument."""
         from asyncio.streams import open_unix_connection
+
         self._open_unix_connection = open_unix_connection
         self._socket_path = Path(socket_path)
         super().__init__(**conn_kwargs)

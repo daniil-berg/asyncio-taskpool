@@ -3,11 +3,24 @@ Miscellaneous helper functions. None of these should be considered part of the p
 """
 
 from __future__ import annotations
+
 import builtins
 from asyncio.coroutines import iscoroutinefunction
 from importlib import import_module
 from inspect import getdoc
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Iterable, Literal, Mapping, Type, TypeVar, cast, overload
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Iterable,
+    Literal,
+    Mapping,
+    Type,
+    TypeVar,
+    cast,
+    overload,
+)
 from typing_extensions import ParamSpec
 
 from .constants import PYTHON_BEFORE_39
@@ -18,14 +31,26 @@ _T = TypeVar("_T")
 
 
 @overload
-async def execute_optional(function: Callable[_P, _R | Awaitable[_R]], args: _P.args = (), kwargs: _P.kwargs = None) -> _R: ...
+async def execute_optional(
+    function: Callable[_P, _R | Awaitable[_R]],
+    args: _P.args = (),
+    kwargs: _P.kwargs = None,
+) -> _R:
+    ...
 
 
 @overload
-async def execute_optional(function: object, args: object = (), kwargs: object = None) -> None: ...
+async def execute_optional(
+    function: object, args: object = (), kwargs: object = None
+) -> None:
+    ...
 
 
-async def execute_optional(function: Callable[_P, _R | Awaitable[_R]] | object, args: _P.args = (), kwargs: _P.kwargs = None) -> _R | None:
+async def execute_optional(
+    function: Callable[_P, _R | Awaitable[_R]] | object,
+    args: _P.args = (),
+    kwargs: _P.kwargs = None,
+) -> _R | None:
     """
     Runs `function` with `args` and `kwargs` and returns its output.
 
@@ -52,18 +77,31 @@ async def execute_optional(function: Callable[_P, _R | Awaitable[_R]] | object, 
 
 
 @overload
-def star_function(function: Callable[..., _R], arg: Mapping[str, object], arg_stars: Literal[2]) -> _R: ...
+def star_function(
+    function: Callable[..., _R],
+    arg: Mapping[str, object],
+    arg_stars: Literal[2],
+) -> _R:
+    ...
 
 
 @overload
-def star_function(function: Callable[..., _R], arg: Iterable[object], arg_stars: Literal[1]) -> _R: ...
+def star_function(
+    function: Callable[..., _R], arg: Iterable[object], arg_stars: Literal[1]
+) -> _R:
+    ...
 
 
 @overload
-def star_function(function: Callable[..., _R], arg: object, arg_stars: Literal[0] = 0) -> _R: ...
+def star_function(
+    function: Callable[..., _R], arg: object, arg_stars: Literal[0] = 0
+) -> _R:
+    ...
 
 
-def star_function(function: Callable[..., _R], arg: Any, arg_stars: int = 0) -> _R:
+def star_function(
+    function: Callable[..., _R], arg: Any, arg_stars: int = 0
+) -> _R:
     """
     Calls `function` passing `arg` to it, optionally unpacking it first.
 
@@ -92,7 +130,9 @@ def star_function(function: Callable[..., _R], arg: Any, arg_stars: int = 0) -> 
         return function(*arg)
     if arg_stars == 2:
         return function(**arg)
-    raise ValueError(f"Invalid argument arg_stars={arg_stars}; must be 0, 1, or 2.")
+    raise ValueError(
+        f"Invalid argument arg_stars={arg_stars}; must be 0, 1, or 2."
+    )
 
 
 def get_first_doc_line(obj: object) -> str | None:
@@ -103,7 +143,11 @@ def get_first_doc_line(obj: object) -> str | None:
     return doc.strip().split("\n", 1)[0].strip()
 
 
-async def return_or_exception(_function_to_execute: Callable[_P, _R | Awaitable[_R]], *args: _P.args, **kwargs: _P.kwargs) -> _R | Exception:
+async def return_or_exception(
+    _function_to_execute: Callable[_P, _R | Awaitable[_R]],
+    *args: _P.args,
+    **kwargs: _P.kwargs,
+) -> _R | Exception:
     """
     Returns the output of a function or the exception thrown during its execution.
 
@@ -120,7 +164,9 @@ async def return_or_exception(_function_to_execute: Callable[_P, _R | Awaitable[
     """
     try:
         if iscoroutinefunction(_function_to_execute):
-            return await cast(Awaitable[_R], _function_to_execute(*args, **kwargs))
+            return await cast(
+                Awaitable[_R], _function_to_execute(*args, **kwargs)
+            )
         else:
             return cast(_R, _function_to_execute(*args, **kwargs))
     except Exception as e:
@@ -133,14 +179,14 @@ def resolve_dotted_path(dotted_path: str) -> object:
 
     Algorithm shamelessly stolen from the `logging.config` module from the standard library.
     """
-    names = dotted_path.split('.')
+    names = dotted_path.split(".")
     module_name = names.pop(0)
     found = import_module(module_name)
     for name in names:
         try:
             found = getattr(found, name)
         except AttributeError:
-            module_name += f'.{name}'
+            module_name += f".{name}"
             import_module(module_name)
             found = getattr(found, name)
     return found
@@ -149,9 +195,13 @@ def resolve_dotted_path(dotted_path: str) -> object:
 class ClassMethodWorkaround:
     """Dirty workaround to make the `@classmethod` decorator work with properties."""
 
-    def __init__(self, method_or_property: Callable[..., Any] | property) -> None:
+    def __init__(
+        self, method_or_property: Callable[..., Any] | property
+    ) -> None:
         if isinstance(method_or_property, property):
-            assert method_or_property.fget is not None, "Missing property getter"
+            assert (
+                method_or_property.fget is not None
+            ), "Missing property getter"
             self._getter = method_or_property.fget
         else:
             self._getter = method_or_property

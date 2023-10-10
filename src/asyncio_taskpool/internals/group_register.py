@@ -5,10 +5,10 @@ It should not be considered part of the public API.
 """
 
 from __future__ import annotations
+
 from asyncio.locks import Lock
 from types import TracebackType
 from typing import Iterator, MutableSet, Set, Type, TypeVar
-
 
 _E = TypeVar("_E", bound=BaseException)
 
@@ -59,6 +59,11 @@ class TaskGroupRegister(MutableSet[int]):
         await self._lock.acquire()
         return None
 
-    async def __aexit__(self, exc_type: Type[_E] | None, exc_val: _E | None, exc_tb: TracebackType | None) -> None:
+    async def __aexit__(
+        self,
+        exc_type: Type[_E] | None,
+        exc_val: _E | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """Provides the asynchronous context manager syntax `async with ... :` when using the lock."""
         self._lock.release()

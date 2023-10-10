@@ -3,13 +3,13 @@ Definition of an :code:`asyncio.Queue` subclass with some small additions.
 """
 
 from __future__ import annotations
+
 import sys
 from asyncio.queues import Queue as _Queue
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Type, TypeVar
 
-
-__all__ = ['Queue']
+__all__ = ["Queue"]
 
 _E = TypeVar("_E", bound=BaseException)
 _T = TypeVar("_T")
@@ -49,7 +49,12 @@ class Queue(_Queue[_T]):
         """
         return await self.get()
 
-    async def __aexit__(self, exc_type: Type[_E] | None, exc_val: _E | None, exc_tb: TracebackType | None) -> None:
+    async def __aexit__(
+        self,
+        exc_type: Type[_E] | None,
+        exc_val: _E | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """
         Implements an asynchronous context manager for the queue.
 

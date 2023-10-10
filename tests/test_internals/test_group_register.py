@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 from asyncio_taskpool.internals import group_register
 
-FOO, BAR = 'foo', 'bar'
+FOO, BAR = "foo", "bar"
 
 
 class TaskGroupRegisterTestCase(IsolatedAsyncioTestCase):
@@ -28,7 +28,7 @@ class TaskGroupRegisterTestCase(IsolatedAsyncioTestCase):
             self.assertTrue(i in self.reg)
         self.assertFalse(4 in self.reg)
 
-    @patch.object(group_register, 'iter', return_value=FOO)
+    @patch.object(group_register, "iter", return_value=FOO)
     def test___iter__(self, mock_iter: MagicMock) -> None:
         self.assertEqual(FOO, self.reg.__iter__())
         mock_iter.assert_called_once_with(self.reg._ids)
