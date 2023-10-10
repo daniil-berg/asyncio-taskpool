@@ -1,6 +1,4 @@
-"""
-Custom exception classes used in various modules.
-"""
+"""Custom exception classes used in various modules."""
 
 
 class PoolException(Exception):
@@ -53,3 +51,6 @@ class ParserError(ServerException):
 
 class CommandError(ServerException):
     pass
+
+
+# ruff: noqa: D101

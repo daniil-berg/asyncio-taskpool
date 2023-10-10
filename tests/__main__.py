@@ -1,6 +1,4 @@
-"""
-Main entry point for all unit tests.
-"""
+"""Main entry point for all unit tests."""
 
 
 import sys

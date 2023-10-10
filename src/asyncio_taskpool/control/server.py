@@ -1,6 +1,4 @@
-"""
-Task pool control server class definitions.
-"""
+"""Task pool control server class definitions."""
 
 from __future__ import annotations
 

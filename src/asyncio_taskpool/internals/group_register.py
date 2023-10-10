@@ -24,6 +24,7 @@ class TaskGroupRegister(MutableSet[int]):
     """
 
     def __init__(self, *task_ids: int) -> None:
+        """Adds the provided `task_ids` to the register."""
         self._ids: Set[int] = set(task_ids)
         self._lock = Lock()
 
@@ -48,11 +49,11 @@ class TaskGroupRegister(MutableSet[int]):
         self._ids.discard(task_id)
 
     async def acquire(self) -> bool:
-        """Wrapper around the lock's `acquire()` method."""
+        """Wrapper around the lock's `acquire` method."""
         return await self._lock.acquire()
 
     def release(self) -> None:
-        """Wrapper around the lock's `release()` method."""
+        """Wrapper around the lock's `release` method."""
         self._lock.release()
 
     async def __aenter__(self) -> None:

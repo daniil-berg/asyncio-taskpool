@@ -121,7 +121,7 @@ select = [
     "E",    # pycodestyle errors
     "W",    # pycodestyle warnings
     "F",    # pyflakes
-#    "D",    # pydocstyle
+    "D",    # pydocstyle
     "A",    # flake8-builtins
     "C",    # flake8-comprehensions
     "B",    # flake8-bugbear
@@ -132,8 +132,9 @@ select = [
 ignore = [
     "E501",  # Line too long -> handled by black
     "D203",  # 1 blank line required before class docstring -> D211 is better
-    "D212",  # Multi-line docstring summary should start at the first line -> ugly, D212 is better
+    "D212",  # Multi-line docstring summary should start at the first line -> ugly, D213 is better
     "D401",  # First line of docstring should be in imperative mood -> no, it shouldn't
+    "D406",  # Section name should end with a newline -> using Google style instead
     "D407",  # Missing dashed underline after section -> different docstring style
     "N818",  # Exception name {name} should be named with an Error suffix -> no, it shouldn't
 ]

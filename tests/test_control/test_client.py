@@ -1,6 +1,4 @@
-"""
-Unittests for the `asyncio_taskpool.client` module.
-"""
+"""Unittests for the `asyncio_taskpool.client` module."""
 
 
 import json

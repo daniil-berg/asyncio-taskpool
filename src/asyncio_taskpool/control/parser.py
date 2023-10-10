@@ -1,6 +1,5 @@
 """
-Definition of the :class:`ControlParser` used in a
-:class:`ControlSession <asyncio_taskpool.control.session.ControlSession>`.
+Definition of the :class:`ControlParser` used in a :class:`ControlSession <asyncio_taskpool.control.session.ControlSession>`.
 
 It should not be considered part of the public API.
 """
@@ -93,7 +92,7 @@ class ControlParser(ArgumentParser):
         base_cls: Type[HelpFormatter] | None = None,
     ) -> Type[HelpFormatter]:
         """
-        Constructs and returns a subclass of :class:`argparse.HelpFormatter`
+        Constructs and returns a subclass of :class:`argparse.HelpFormatter`.
 
         The formatter class will have the defined `terminal_width`.
 

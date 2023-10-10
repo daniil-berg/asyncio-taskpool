@@ -1,6 +1,4 @@
-"""
-Unittests for the `asyncio_taskpool.pool` module.
-"""
+"""Unittests for the `asyncio_taskpool.pool` module."""
 
 from asyncio.exceptions import CancelledError
 from asyncio.locks import Event, Semaphore
@@ -322,7 +320,7 @@ class BaseTaskPoolTestCase(CommonTestCase):
         mock__task_wrapper: AsyncMock,
         mock_create_task: MagicMock,
     ) -> None:
-        mock_group_reg = set_up_mock_group_register(mock_reg_cls)
+        mock_group_reg = _set_up_mock_group_register(mock_reg_cls)
         mock_create_task.return_value = mock_task = MagicMock()
         mock__task_wrapper.return_value = mock_wrapped = MagicMock()
         mock_coroutine, mock_cancel_cb, mock_end_cb = (
@@ -697,7 +695,7 @@ class TaskPoolTestCase(CommonTestCase):
         mock_create_task: MagicMock,
     ) -> None:
         mock__generate_group_name.return_value = generated_name = "name 123"
-        mock_group_reg = set_up_mock_group_register(mock_reg_cls)
+        mock_group_reg = _set_up_mock_group_register(mock_reg_cls)
         mock__apply_spawner.return_value = mock_apply_coroutine = object()
         mock_create_task.return_value = fake_task = object()
         mock_func, num, group_name = MagicMock(), 3, FOO + BAR
@@ -909,7 +907,7 @@ class TaskPoolTestCase(CommonTestCase):
         mock__arg_consumer: MagicMock,
         mock_create_task: MagicMock,
     ) -> None:
-        mock_group_reg = set_up_mock_group_register(mock_reg_cls)
+        mock_group_reg = _set_up_mock_group_register(mock_reg_cls)
         mock__arg_consumer.return_value = fake_consumer = object()
         mock_create_task.return_value = fake_task = object()
 
@@ -1191,7 +1189,7 @@ class SimpleTaskPoolTestCase(CommonTestCase):
         mock__start_num: AsyncMock,
         mock_create_task: MagicMock,
     ) -> None:
-        mock_group_reg = set_up_mock_group_register(mock_reg_cls)
+        mock_group_reg = _set_up_mock_group_register(mock_reg_cls)
         mock__start_num.return_value = mock_start_num_coroutine = object()
         mock_create_task.return_value = fake_task = object()
         self.task_pool._task_groups = {}
@@ -1247,7 +1245,7 @@ class SimpleTaskPoolTestCase(CommonTestCase):
         mock_stop.assert_called_once_with(num)
 
 
-def set_up_mock_group_register(mock_reg_cls: MagicMock) -> MagicMock:
+def _set_up_mock_group_register(mock_reg_cls: MagicMock) -> MagicMock:
     mock_grp_aenter, mock_grp_aexit, mock_grp_add = (
         AsyncMock(),
         AsyncMock(),

@@ -63,9 +63,9 @@ async def execute_optional(
             Callable that accepts the provided positional and keyword-arguments.
             If it is a coroutine function, it will be awaited.
             If it is not a callable, nothing is returned.
-        *args (optional):
+        args (optional):
             Positional arguments to pass to `function`.
-        **kwargs (optional):
+        kwargs (optional):
             Keyword-arguments to pass to `function`.
 
     Returns:
@@ -208,7 +208,7 @@ def resolve_dotted_path(dotted_path: str) -> object:
     return found
 
 
-class ClassMethodWorkaround:
+class _ClassMethodWorkaround:
     """Dirty workaround to make `@classmethod` work with properties."""
 
     def __init__(
@@ -231,6 +231,6 @@ class ClassMethodWorkaround:
 
 if not TYPE_CHECKING and PYTHON_BEFORE_39:
     # Starting with Python 3.9, this is thankfully no longer necessary.
-    classmethod = ClassMethodWorkaround  # noqa
+    classmethod = _ClassMethodWorkaround  # noqa
 else:
     classmethod = builtins.classmethod  # noqa

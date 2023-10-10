@@ -512,7 +512,7 @@ class BaseTaskPool:
                 The name of the group of tasks that shall be cancelled.
             group_reg:
                 The task group register object containing the task IDs.
-            msg (optional):
+            cancel_kw:
                 Passed to the `Task.cancel()` method of every task specified
                 by the `task_ids`.
         """

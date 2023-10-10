@@ -1,6 +1,4 @@
-"""
-Unittests for the `asyncio_taskpool.session` module.
-"""
+"""Unittests for the `asyncio_taskpool.session` module."""
 
 from __future__ import annotations
 

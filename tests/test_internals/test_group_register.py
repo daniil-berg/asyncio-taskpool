@@ -1,6 +1,4 @@
-"""
-Unittests for the `asyncio_taskpool.group_register` module.
-"""
+"""Unittests for the `asyncio_taskpool.group_register` module."""
 
 
 from asyncio.locks import Lock

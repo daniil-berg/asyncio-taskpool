@@ -1,6 +1,4 @@
-"""
-Unittests for the `asyncio_taskpool.queue_context` module.
-"""
+"""Unittests for the `asyncio_taskpool.queue_context` module."""
 
 from typing import Any
 from unittest import IsolatedAsyncioTestCase

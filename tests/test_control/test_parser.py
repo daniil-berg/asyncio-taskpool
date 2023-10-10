@@ -1,6 +1,4 @@
-"""
-Unittests for the `asyncio_taskpool.control.parser` module.
-"""
+"""Unittests for the `asyncio_taskpool.control.parser` module."""
 
 from argparse import (
     SUPPRESS,

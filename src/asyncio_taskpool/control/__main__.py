@@ -1,6 +1,4 @@
-"""
-CLI entry point script for a :class:`ControlClient`.
-"""
+"""CLI entry point script for a :class:`ControlClient`."""
 from __future__ import annotations
 
 from argparse import ArgumentParser
@@ -20,6 +18,7 @@ HOST, PORT = "host", "port"
 
 
 def parse_cli(args: Sequence[str] | None = None) -> Dict[str, Any]:
+    """Parses command line arguments returning the resulting namespace."""
     parser = ArgumentParser(
         prog=f"{PACKAGE_NAME}.control",
         description=f"Simple CLI based control client for {PACKAGE_NAME}",
@@ -54,6 +53,11 @@ def parse_cli(args: Sequence[str] | None = None) -> Dict[str, Any]:
 
 
 async def main() -> None:
+    """
+    Main entrypoint for the CLI script.
+
+    Parses the command line arguments and starts the appropriate client.
+    """
     kwargs = parse_cli()
     client_cls = kwargs.pop(CLIENT_CLASS)
     await client_cls(**kwargs).start()

@@ -1,6 +1,4 @@
-"""
-Unittests for the `asyncio_taskpool.helpers` module.
-"""
+"""Unittests for the `asyncio_taskpool.helpers` module."""
 
 import importlib
 from typing import Any, Tuple, cast
@@ -140,17 +138,17 @@ class ClassMethodWorkaroundTestCase(TestCase):
             return "bar"
 
         prop = property(getter)
-        instance = helpers.ClassMethodWorkaround(func)
+        instance = helpers._ClassMethodWorkaround(func)
         self.assertIs(func, instance._getter)
-        instance = helpers.ClassMethodWorkaround(prop)
+        instance = helpers._ClassMethodWorkaround(prop)
         self.assertIs(getter, instance._getter)
 
-    @patch.object(helpers.ClassMethodWorkaround, "__init__", return_value=None)
+    @patch.object(helpers._ClassMethodWorkaround, "__init__", return_value=None)
     def test_get(self, _mock_init: MagicMock) -> None:
         def func(x: MagicMock) -> Any:
             return x.__name__
 
-        instance = helpers.ClassMethodWorkaround(MagicMock())
+        instance = helpers._ClassMethodWorkaround(MagicMock())
         instance._getter = func
         obj, cls = None, MagicMock
         expected_output = "MagicMock"
@@ -170,7 +168,7 @@ class ClassMethodWorkaroundTestCase(TestCase):
         try:
             constants.PYTHON_BEFORE_39 = True
             importlib.reload(helpers)
-            self.assertIs(helpers.ClassMethodWorkaround, helpers.classmethod)
+            self.assertIs(helpers._ClassMethodWorkaround, helpers.classmethod)
             constants.PYTHON_BEFORE_39 = False
             importlib.reload(helpers)
             self.assertIs(classmethod, helpers.classmethod)

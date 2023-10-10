@@ -1,6 +1,4 @@
-"""
-Unittests for the `asyncio_taskpool.server` module.
-"""
+"""Unittests for the `asyncio_taskpool.server` module."""
 
 
 import asyncio

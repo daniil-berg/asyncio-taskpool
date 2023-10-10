@@ -1,6 +1,4 @@
-"""
-Classes of control clients for a simply interface to a task pool control server.
-"""
+"""Control client classes for interfacing with a task pool control server."""
 
 from __future__ import annotations
 

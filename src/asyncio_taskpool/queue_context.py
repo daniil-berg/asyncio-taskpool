@@ -1,6 +1,4 @@
-"""
-Definition of an :code:`asyncio.Queue` subclass with some small additions.
-"""
+"""Definition of a :code:`asyncio.Queue` subclass with some small additions."""
 
 from __future__ import annotations
 

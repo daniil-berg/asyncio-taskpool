@@ -86,7 +86,7 @@ class ControlSession:
         will be its return value (as an encoded string).
 
         Args:
-            prop:
+            method:
                 Reference to the method defined on the `_pool` instance's class.
             **kwargs (optional):
                 Must correspond to the arguments expected by the `method`.
