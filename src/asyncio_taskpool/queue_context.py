@@ -23,16 +23,18 @@ class Queue(_Queue[_T]):
     """
     Adds a little syntactic sugar to the :code:`asyncio.Queue`.
 
-    Allows being used as an async context manager awaiting `get` upon entering the context and calling
-    :meth:`item_processed` upon exiting it.
+    Allows being used as an async context manager awaiting `get` upon entering
+    the context and calling :meth:`item_processed` upon exiting it.
     """
 
     def item_processed(self) -> None:
         """
         Does exactly the same as :meth:`asyncio.Queue.task_done`.
 
-        This method exists because `task_done` is an atrocious name for the method. It communicates the wrong thing,
-        invites confusion, and immensely reduces readability (in the context of this library). And readability counts.
+        This method exists because `task_done` is an atrocious name for the
+        method. It communicates the wrong thing, invites confusion, and
+        immensely reduces readability (in the context of this library).
+        And readability counts.
         """
         self.task_done()
 
@@ -40,8 +42,8 @@ class Queue(_Queue[_T]):
         """
         Implements an asynchronous context manager for the queue.
 
-        Upon entering :meth:`get` is awaited and subsequently whatever came out of the queue is returned.
-        It allows writing code this way:
+        Upon entering :meth:`get` is awaited and subsequently whatever came out
+        of the queue is returned. It allows writing code this way:
         >>> queue = Queue()
         >>> ...
         >>> async with queue as item:
@@ -58,7 +60,8 @@ class Queue(_Queue[_T]):
         """
         Implements an asynchronous context manager for the queue.
 
-        Upon exiting :meth:`item_processed` is called. This is why this context manager may not always be what you want,
-        but in some situations it makes the code much cleaner.
+        Upon exiting :meth:`item_processed` is called. This is why this context
+        manager may not always be what you want, but in some situations it makes
+        the code much cleaner.
         """
         self.item_processed()

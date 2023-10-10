@@ -34,8 +34,10 @@ class ControlSession:
     """
     Manages a single control session between a server and a client.
 
-    The commands received from a connected client are translated into method calls on the task pool instance.
-    A subclass of the standard :class:`argparse.ArgumentParser` is used to handle the input read from the stream.
+    The commands received from a connected client are translated into method
+    calls on the task pool instance. A subclass of the standard
+    :class:`argparse.ArgumentParser` is used to handle the input read from
+    the stream.
     """
 
     def __init__(
@@ -47,17 +49,19 @@ class ControlSession:
         """
         Connection to the control server should already been established.
 
-        For more convenient/efficient access, some of the server's properties are saved in separate attributes.
-        The argument parser is _not_ instantiated in the constructor. It requires a bit of client information during
-        initialization, which is obtained in the `client_handshake` method; only there is the parser fully configured.
+        For more convenient/efficient access, some of the server's properties
+        are saved in separate attributes. The argument parser is _not_
+        instantiated in the constructor. It requires a bit of client information
+        during initialization, which is obtained in the `client_handshake`
+        method; only there is the parser fully configured.
 
         Args:
             server:
-                The instance of a :class:`ControlServer` subclass starting the session.
+                :class:`ControlServer` subclass instance starting the session.
             reader:
-                The `asyncio.StreamReader` created when a client connected to the server.
+                `asyncio.StreamReader` created when a client connected.
             writer:
-                The `asyncio.StreamWriter` created when a client connected to the server.
+                `asyncio.StreamWriter` created when a client connected.
         """
         self._control_server: "ControlServer[ClientT]" = server
         self._pool: TaskPool | SimpleTaskPool = server.pool
@@ -68,22 +72,25 @@ class ControlSession:
         self._response_buffer: StringIO = StringIO()
 
     async def _exec_method_and_respond(
-        self, method: Callable[..., Any], **kwargs: Any
+        self,
+        method: Callable[..., Any],
+        **kwargs: Any,
     ) -> None:
         """
-        Takes a pool method reference, executes it, and writes a response accordingly.
+        Takes a method, executes it, and writes a response accordingly.
 
-        If the first parameter is named `self`, the method will be called with the `_pool` instance as its first
-        positional argument.
-        If it returns nothing, the response upon successful execution will be :const:`constants.CMD_OK`, otherwise the
-        response written to the stream will be its return value (as an encoded string).
+        If the first parameter is named `self`, the method will be called with
+        the `_pool` instance as its first positional argument.
+        If it returns nothing, the response upon successful execution will be
+        :const:`constants.CMD_OK`, otherwise the response written to the stream
+        will be its return value (as an encoded string).
 
         Args:
             prop:
-                The reference to the method defined on the `_pool` instance's class.
+                Reference to the method defined on the `_pool` instance's class.
             **kwargs (optional):
                 Must correspond to the arguments expected by the `method`.
-                Correctly unpacks arbitrary-length positional and keyword-arguments.
+                Unpacks arbitrary-length positional and keyword-arguments.
         """
         log.debug(
             "%s calls %s.%s",
@@ -110,20 +117,25 @@ class ControlSession:
         )
 
     async def _exec_property_and_respond(
-        self, prop: property, **kwargs: Any
+        self,
+        prop: property,
+        **kwargs: Any,
     ) -> None:
         """
-        Takes a pool property reference, executes its setter or getter, and writes a response accordingly.
+        Executes a property setter/getter, and writes a response accordingly.
 
-        The property set/get method will always be called with the `_pool` instance as its first positional argument.
+        The property set/get method will always be called with the `_pool`
+        instance as its first positional argument.
 
         Args:
             prop:
-                The reference to the property defined on the `_pool` instance's class.
+                Property defined on the `_pool` instance's class.
             **kwargs (optional):
-                If not empty, the property setter is executed and the keyword arguments are passed along to it; the
-                response upon successful execution will be :const:`constants.CMD_OK`. Otherwise the property getter is
-                executed and the response written to the stream will be its return value (as an encoded string).
+                If not empty, the property setter is executed and the keyword
+                arguments are passed along to it; the response upon successful
+                execution will be :const:`constants.CMD_OK`. Otherwise the
+                property getter is executed and the response written to the
+                stream will be its return value (as an encoded string).
         """
         if kwargs:
             assert prop.fset is not None, "Property has not setter"
@@ -152,7 +164,8 @@ class ControlSession:
         Must be invoked before starting any other client interaction.
 
         Client info is retrieved, server info is sent back, and the
-        :class:`ControlParser <asyncio_taskpool.control.parser.ControlParser>` is set up.
+        :class:`ControlParser <asyncio_taskpool.control.parser.ControlParser>`
+        is set up.
         """
         msg = (await self._reader.readline()).decode().strip()
         client_info = json.loads(msg)
@@ -176,9 +189,11 @@ class ControlSession:
         """
         Takes a message from the client and attempts to parse it.
 
-        If a parsing error occurs, it is returned to the client. If the :exc:`HelpRequested` exception was raised by the
-        :class:`ControlParser`, nothing else happens. Otherwise, the appropriate `_exec...` method is called with the
-        entire dictionary of keyword-arguments returned by the :class:`ControlParser` passed into it.
+        If a parsing error occurs, it is returned to the client. If the
+        :exc:`HelpRequested` exception was raised by the :class:`ControlParser`,
+        nothing else happens. Otherwise, the appropriate `_exec...` method is
+        called with the entire dictionary of keyword-arguments returned by the
+        :class:`ControlParser` passed into it.
 
         Args:
             msg: The non-empty string read from the client stream.
@@ -208,8 +223,9 @@ class ControlSession:
         Enters the main control loop listening to client input.
 
         This method only returns if either the server or the client disconnect.
-        Messages from the client are read, parsed, and turned into pool commands (if possible).
-        This method should be called, when the client connection was established and the handshake was successful.
+        Messages from the client are read, parsed, and turned into pool commands
+        (if possible). This method should be called, when the client connection
+        was established and the handshake was successful.
         It will obviously block indefinitely.
         """
         while self._control_server.is_serving():

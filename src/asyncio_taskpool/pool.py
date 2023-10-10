@@ -2,10 +2,12 @@
 Definitions of the task pool classes.
 
 The :class:`BaseTaskPool` is a parent class and not intended for direct use.
-The :class:`TaskPool` and :class:`SimpleTaskPool` are subclasses intended for direct use.
-While the former allows for heterogeneous collections of tasks that can be entirely unrelated to one another, the 
-latter requires a preemptive decision about the function **and** its arguments upon initialization and only allows
-to dynamically control the **number** of tasks running at any point in time.
+The :class:`TaskPool` and :class:`SimpleTaskPool` are subclasses intended for
+direct use. While the former allows for heterogeneous collections of tasks that
+can be entirely unrelated to one another, the latter requires a preemptive
+decision about the function **and** its arguments upon initialization and only
+allows to dynamically control the **number** of tasks running at any given
+point in time.
 
 For further details about the classes check their respective documentation.
 """
@@ -70,30 +72,27 @@ class BaseTaskPool:
         return len(cls._pools) - 1
 
     def __init__(self, pool_size: float = inf, name: str | None = None) -> None:
-        """Initializes the necessary internal attributes and adds the new pool to the general pools list."""
-        # Initialize a counter for the total number of tasks started through the pool.
-        self._num_started: int = 0
+        """Adds the new pool to the general pools list."""
+        self._num_started: int = 0  # total number of tasks started
 
-        # Initialize flags; immutably set the name.
         self._locked: bool = False
         self._closed: Event = Event()
         self._name: str | None = name
 
-        # The following three dictionaries are the actual containers of the tasks controlled by the pool.
+        # The actual containers of the tasks controlled by the pool.
         self._tasks_running: Dict[int, Task[Any]] = {}
         self._tasks_cancelled: Dict[int, Task[Any]] = {}
         self._tasks_ended: Dict[int, Task[Any]] = {}
 
-        # These next two attributes act as synchronisation primitives necessary for managing the pool.
+        # Synchronisation primitives necessary for managing the pool.
         self._enough_room: Semaphore = Semaphore()
         self._task_groups: Dict[str, TaskGroupRegister] = {}
 
-        # Mapping task group names to sets of meta tasks, and a bucket for cancelled meta tasks.
+        # Map task group names to sets of meta tasks:
         self._group_meta_tasks_running: Dict[str, Set[Task[Any]]] = {}
         self._meta_tasks_cancelled: Set[Task[Any]] = set()
 
-        # Finish with method/functions calls that add the pool to the internal list of pools, set its initial size,
-        # and issue a log message.
+        # Add the pool to the internal list of pools and set its initial size:
         self._idx: int = self._add_pool(self)
         self.pool_size = pool_size  # type: ignore[assignment]
         log.debug("%s initialized", str(self))
@@ -112,7 +111,8 @@ class BaseTaskPool:
         """
         Sets the maximum number of concurrently running tasks in the pool.
 
-        NOTE: Increasing the pool size will immediately start tasks that are awaiting enough room to run.
+        NOTE: Increasing the pool size will immediately start tasks that are
+        awaiting enough room to run.
 
         Args:
             value: A non-negative integer.
@@ -146,7 +146,8 @@ class BaseTaskPool:
         """
         Number of tasks in the pool that are still running.
 
-        At the moment a task's `end_callback` or `cancel_callback` is fired, it is no longer considered running.
+        At the moment a task's `end_callback` or `cancel_callback` is fired,
+        it is no longer considered running.
         """
         return len(self._tasks_running)
 
@@ -155,8 +156,9 @@ class BaseTaskPool:
         """
         Number of tasks in the pool that have been cancelled.
 
-        At the moment a task's `cancel_callback` is fired, it is considered to be cancelled and no longer running,
-        until its `end_callback` is fired, at which point it is considered ended (instead of cancelled).
+        At the moment a task's `cancel_callback` is fired, it is considered to
+        be cancelled and no longer running, until its `end_callback` is fired,
+        at which point it is considered ended (instead of cancelled).
         """
         return len(self._tasks_cancelled)
 
@@ -165,9 +167,10 @@ class BaseTaskPool:
         """
         Number of tasks in the pool that have stopped running.
 
-        At the moment a task's `end_callback` is fired, it is considered ended and no longer running (or cancelled).
-        When a task is cancelled, it is not immediately considered ended; only after its `cancel_callback` has returned,
-        does it then actually end.
+        At the moment a task's `end_callback` is fired, it is considered ended
+        and no longer running (or cancelled). When a task is cancelled, it is
+        not immediately considered ended; only after its `cancel_callback`
+        has returned, does it then actually end.
         """
         return len(self._tasks_ended)
 
@@ -176,7 +179,8 @@ class BaseTaskPool:
         """
         `False` if the number of running tasks is less than the pool size.
 
-        When the pool is full, any call to start a new task within it will block, until there is enough room for it.
+        When the pool is full, any call to start a new task within it will
+        block, until there is enough room for it.
         """
         return self._enough_room.locked()
 
@@ -185,13 +189,16 @@ class BaseTaskPool:
         Returns the set of IDs of all tasks in the specified groups.
 
         Args:
-            *group_names: Each element must be a name of a task group that exists within the pool.
+            *group_names:
+                Must be names of task groups that exists within the pool.
 
         Returns:
-            Set of integers representing the task IDs belonging to the specified groups.
+            Set of integers representing the task IDs belonging to the
+            specified groups.
 
         Raises:
-            `InvalidGroupName`: One of the specified`group_names` does not exist in the pool.
+            `InvalidGroupName`:
+                One of the specified`group_names` does not exist in the pool.
         """
         ids: Set[int] = set()
         for name in group_names:
@@ -213,19 +220,26 @@ class BaseTaskPool:
         """
         Checks necessary conditions for starting a task (group) in the pool.
 
-        Either something that is expected to be a coroutine (i.e. awaitable) or something that is expected to be a
-        coroutine _function_ will be checked.
+        Either something that is expected to be a coroutine (i.e. awaitable) or
+        something that is expected to be a coroutine _function_ will be checked.
 
         Args:
-            awaitable: If this is passed, `function` must be `None`.
-            function: If this is passed, `awaitable` must be `None`.
-            ignore_lock (optional): If `True`, a locked pool will produce no error here.
+            awaitable:
+                If this is passed, `function` must be `None`.
+            function:
+                If this is passed, `awaitable` must be `None`.
+            ignore_lock (optional):
+                If `True`, a locked pool will produce no error here.
 
         Raises:
-            `AssertionError`: Both or neither of `awaitable` and `function` were passed.
-            `asyncio_taskpool.exceptions.PoolIsClosed`: The pool is closed.
-            `asyncio_taskpool.exceptions.NotCoroutine`: `awaitable` is not a cor. / `function` not a cor. func.
-            `asyncio_taskpool.exceptions.PoolIsLocked`: The pool has been locked and `ignore_lock` is `False`.
+            `AssertionError`:
+                Both or neither of `awaitable` and `function` were passed.
+            `asyncio_taskpool.exceptions.PoolIsClosed`:
+                The pool is closed.
+            `asyncio_taskpool.exceptions.NotCoroutine`:
+                `awaitable` is not a cor. / `function` not a cor. func.
+            `asyncio_taskpool.exceptions.PoolIsLocked`:
+                The pool has been locked and `ignore_lock` is `False`.
         """
         assert (awaitable is None) != (function is None)
         if awaitable and not iscoroutine(awaitable):
@@ -242,19 +256,22 @@ class BaseTaskPool:
         return f"{self}_Task-{task_id}"
 
     async def _task_cancellation(
-        self, task_id: int, custom_callback: CancelCB | None = None
+        self,
+        task_id: int,
+        custom_callback: CancelCB | None = None,
     ) -> None:
         """
         Universal callback to be run upon any task in the pool being cancelled.
 
-        Required for keeping track of running/cancelled tasks and proper logging.
+        Keeps track of running/cancelled tasks and does proper logging.
 
         Args:
             task_id:
                 The ID of the task that has been cancelled.
             custom_callback (optional):
-                A callback to execute after cancellation of the task.
-                It is run at the end of this function with the `task_id` as its only positional argument.
+                Callback to execute after cancellation of the task. Run at the
+                end of this function with the `task_id` as its only positional
+                argument.
         """
         log.debug("Cancelling %s ...", self._task_name(task_id))
         self._tasks_cancelled[task_id] = self._tasks_running.pop(task_id)
@@ -262,12 +279,14 @@ class BaseTaskPool:
         await execute_optional(custom_callback, args=(task_id,))
 
     async def _task_ending(
-        self, task_id: int, custom_callback: EndCB | None = None
+        self,
+        task_id: int,
+        custom_callback: EndCB | None = None,
     ) -> None:
         """
         Universal callback to be run upon any task in the pool ending its work.
 
-        Required for keeping track of running/cancelled/ended tasks and proper logging.
+        Keeps track of running/cancelled/ended tasks and does proper logging.
         Also releases room in the task pool for potentially waiting tasks.
 
         Args:
@@ -275,7 +294,8 @@ class BaseTaskPool:
                 The ID of the task that has reached its end.
             custom_callback (optional):
                 A callback to execute after the task has ended.
-                It is run at the end of this function with the `task_id` as its only positional argument.
+                It is run at the end of this function with the `task_id` as its
+                only positional argument.
         """
         try:
             self._tasks_ended[task_id] = self._tasks_running.pop(task_id)
@@ -297,8 +317,9 @@ class BaseTaskPool:
 
         Returns/raises whatever the wrapped coroutine does.
 
-        Responsible for catching cancellation and awaiting the `_task_cancellation` callback, as well as for awaiting
-        the `_task_ending` callback, after the coroutine returns or raises an exception.
+        Catches cancellation and awaits the `_task_cancellation` callback, as
+        well as the `_task_ending` callback, after the coroutine returns or
+        raises an exception.
 
         Args:
             awaitable:
@@ -334,16 +355,20 @@ class BaseTaskPool:
         """
         Starts a coroutine as a new task in the pool.
 
-        This method can block for a significant amount of time, **only if** the pool is full. Otherwise it merely needs
-        to acquire the :class:`TaskGroupRegister` lock, which should never be held for a long time.
+        This method can block for a significant amount of time, **only if** the
+        pool is full. Otherwise it merely needs to acquire the
+        :class:`TaskGroupRegister` lock, which should never be held for a
+        long time.
 
         Args:
             awaitable:
                 The actual coroutine to be run within the task pool.
             group_name (optional):
-                Name of the task group to add the new task to; defaults to the `DEFAULT_TASK_GROUP` constant.
+                Name of the task group to add the new task to;
+                defaults to the `DEFAULT_TASK_GROUP` constant.
             ignore_lock (optional):
-                If `True`, even if the pool is locked, the task will still be started.
+                If `True`, even if the pool is locked,
+                the task will still be started.
             end_callback (optional):
                 A callback to execute after the task has ended.
                 It is run with the task's ID as its only positional argument.
@@ -356,7 +381,8 @@ class BaseTaskPool:
         """
         self._check_start(awaitable=awaitable, ignore_lock=ignore_lock)
         await self._enough_room.acquire()
-        # TODO: Make sure that cancellation (group or pool) interrupts this method after context switching!
+        # TODO: Make sure that cancellation (group or pool) interrupts
+        #       this method after context switching!
         #       Possibly make use of the task group register for that.
         group_reg = self._task_groups.setdefault(
             group_name, TaskGroupRegister()
@@ -381,9 +407,12 @@ class BaseTaskPool:
             task_id: The ID of a task still running within the pool.
 
         Raises:
-            `asyncio_taskpool.exceptions.AlreadyCancelled`: The task with `task_id` has been (recently) cancelled.
-            `asyncio_taskpool.exceptions.AlreadyEnded`: The task with `task_id` has ended (recently).
-            `asyncio_taskpool.exceptions.InvalidTaskID`: No task with `task_id` is known to the pool.
+            `asyncio_taskpool.exceptions.AlreadyCancelled`:
+                The task with `task_id` has been (recently) cancelled.
+            `asyncio_taskpool.exceptions.AlreadyEnded`:
+                The task with `task_id` has ended (recently).
+            `asyncio_taskpool.exceptions.InvalidTaskID`:
+                No task with `task_id` is known to the pool.
         """
         try:
             return self._tasks_running[task_id]
@@ -403,16 +432,18 @@ class BaseTaskPool:
         """
         Returns a dictionary to unpack in a `Task.cancel()` method.
 
-        This method exists to ensure proper compatibility with older Python versions.
-        If `msg` is `None`, an empty dictionary is returned.
-        If `PYTHON_BEFORE_39` is `True` a warning is issued before returning an empty dictionary.
-        Otherwise the keyword dictionary contains the `msg` parameter.
+        This method exists to ensure proper compatibility with older Python
+        versions. If `msg` is `None`, an empty dictionary is returned. If
+        `PYTHON_BEFORE_39` is `True` a warning is issued before returning an
+        empty dictionary. Otherwise the keyword dictionary contains the `msg`
+        parameter.
         """
         if msg is None:
             return {}
         if PYTHON_BEFORE_39:
             warnings.warn(
-                "Parameter `msg` is not available with Python versions before 3.9 and will be ignored."
+                "Parameter `msg` is not available with Python versions "
+                "before 3.9 and will be ignored."
             )
             return {}
         return {"msg": msg}
@@ -423,16 +454,24 @@ class BaseTaskPool:
 
         Each task ID must belong to a task still running within the pool.
 
-        Note that once a pool has been flushed (see below), IDs of tasks that have ended previously will be forgotten.
+        Note that once a pool has been flushed (see below), IDs of tasks that
+        have ended previously will be forgotten.
 
         Args:
-            *task_ids: Arbitrary number of integers. Each must be an ID of a task still running within the pool.
-            msg (optional): Passed to the `Task.cancel()` method of every task specified by the `task_ids`.
+            *task_ids:
+                Arbitrary number of integers.
+                Each must be an ID of a task still running within the pool.
+            msg (optional):
+                Passed to the `Task.cancel()` method of every task specified
+                by the `task_ids`.
 
         Raises:
-            `AlreadyCancelled`: One of the `task_ids` belongs to a task that has been (recently) cancelled.
-            `AlreadyEnded`: One of the `task_ids` belongs to a task that has ended (recently).
-            `InvalidTaskID`: One of the `task_ids` is not known to the pool.
+            `AlreadyCancelled`:
+                One of the `task_ids` belongs to a task that has been cancelled.
+            `AlreadyEnded`:
+                One of the `task_ids` belongs to a task that has ended.
+            `InvalidTaskID`:
+                One of the `task_ids` is not known to the pool.
         """
         tasks = [self._get_running_task(task_id) for task_id in task_ids]
         kw = self._get_cancel_kw(msg)
@@ -440,7 +479,7 @@ class BaseTaskPool:
             task.cancel(**kw)
 
     def _cancel_group_meta_tasks(self, group_name: str) -> None:
-        """Cancels and forgets all meta tasks associated with the task group named `group_name`."""
+        """Cancels and forgets all meta tasks associated with the task group."""
         try:
             meta_tasks = self._group_meta_tasks_running.pop(group_name)
         except KeyError:
@@ -455,7 +494,10 @@ class BaseTaskPool:
         )
 
     def _cancel_and_remove_all_from_group(
-        self, group_name: str, group_reg: TaskGroupRegister, **cancel_kw: Any
+        self,
+        group_name: str,
+        group_reg: TaskGroupRegister,
+        **cancel_kw: Any,
     ) -> None:
         """
         Removes all tasks from the specified group and cancels them.
@@ -463,9 +505,13 @@ class BaseTaskPool:
         Does nothing to tasks, that are no longer running.
 
         Args:
-            group_name: The name of the group of tasks that shall be cancelled.
-            group_reg: The task group register object containing the task IDs.
-            msg (optional): Passed to the `Task.cancel()` method of every task specified by the `task_ids`.
+            group_name:
+                The name of the group of tasks that shall be cancelled.
+            group_reg:
+                The task group register object containing the task IDs.
+            msg (optional):
+                Passed to the `Task.cancel()` method of every task specified
+                by the `task_ids`.
         """
         self._cancel_group_meta_tasks(group_name)
         while group_reg:
@@ -481,16 +527,21 @@ class BaseTaskPool:
 
         The task group is subsequently forgotten by the pool.
 
-        If any methods such launched meta tasks belonging to that group, these meta tasks are cancelled before the
-        actual tasks are cancelled. This means that any tasks "queued" to be started by a meta task will
+        If any methods such launched meta tasks belonging to that group,
+        these meta tasks are cancelled before the actual tasks are cancelled.
+        This means that any tasks "queued" to be started by a meta task will
         **never even start**.
 
         Args:
-            group_name: The name of the group of tasks (and meta tasks) that shall be cancelled.
-            msg (optional): Passed to the `Task.cancel()` method of every task in the group.
+            group_name:
+                The name of the group of tasks (and meta tasks) that shall
+                be cancelled.
+            msg (optional):
+                Passed to the `Task.cancel()` method of every task in the group.
 
         Raises:
-            `InvalidGroupName`: No task group named `group_name` exists in the pool.
+            `InvalidGroupName`:
+                No task group named `group_name` exists in the pool.
         """
         log.debug("%s cancelling tasks in group %s", str(self), group_name)
         try:
@@ -507,8 +558,9 @@ class BaseTaskPool:
         """
         Cancels all tasks still running within the pool (including meta tasks).
 
-        If any methods such launched meta tasks belonging to that group, these meta tasks are cancelled before the
-        actual tasks are cancelled. This means that any tasks "queued" to be started by a meta task will
+        If any methods such launched meta tasks belonging to that group, these
+        meta tasks are cancelled before the actual tasks are cancelled. This
+        means that any tasks "queued" to be started by a meta task will
         **never even start**.
 
         Args:
@@ -522,11 +574,13 @@ class BaseTaskPool:
 
     def _pop_ended_meta_tasks(self) -> Set[Task[Any]]:
         """
-        Goes through all not-cancelled meta tasks, checks if they are done already, and returns those that are.
+        Returns all not-cancelled meta tasks that are done.
 
-        The internal `_group_meta_tasks_running` dictionary is updated accordingly, i.e. after this method returns, the
-        values (sets) only contain meta tasks that were not done yet. In addition, names of groups that no longer
-        have any running meta tasks associated with them are removed from the keys.
+        The internal `_group_meta_tasks_running` dictionary is updated
+        accordingly, i.e. after this method returns, the values (sets) only
+        contain meta tasks that were not done yet. In addition, names of groups
+        that no longer have any running meta tasks associated with them are
+        removed from the keys.
         """
         obsolete_keys, ended_meta_tasks = [], set()
         for group_name in self._group_meta_tasks_running.keys():
@@ -541,7 +595,8 @@ class BaseTaskPool:
                 self._group_meta_tasks_running[group_name] = still_running
             else:
                 obsolete_keys.append(group_name)
-        # If a group no longer has running meta tasks associated with, we can remove its name from the dictionary.
+        # If a group no longer has running meta tasks associated with,
+        # we can remove its name from the dictionary.
         for group_name in obsolete_keys:
             del self._group_meta_tasks_running[group_name]
         return ended_meta_tasks
@@ -550,11 +605,13 @@ class BaseTaskPool:
         """
         Gathers (i.e. awaits) all ended/cancelled tasks in the pool.
 
-        The tasks are subsequently forgotten by the pool. This method exists mainly to free up memory of unneeded
-        `Task` objects. It also gets rid of unneeded (ended/cancelled) meta tasks.
+        The tasks are subsequently forgotten by the pool. This method exists
+        mainly to free up memory of unneeded `Task` objects. It also gets rid
+        of unneeded (ended/cancelled) meta tasks.
 
-        It blocks, **only if** any of the tasks block while catching a `asyncio.CancelledError` or any of the callbacks
-        registered for the tasks block.
+        It blocks, **only if** any of the tasks block while catching a
+        `asyncio.CancelledError` or any of the callbacks registered for the
+        tasks block.
 
         Args:
             return_exceptions (optional): Passed directly into `gather`.
@@ -580,12 +637,14 @@ class BaseTaskPool:
 
         Once this method is called, no more tasks can be started in the pool.
 
-        Note that this method may block indefinitely as long as any task in the pool is not done. This includes meta
-        tasks launched by other methods, which may or may not even end by themselves. To avoid this, make sure to call
-        :meth:`cancel_all` first.
+        Note that this method may block indefinitely as long as any task in the
+        pool is not done. This includes meta tasks launched by other methods,
+        which may or may not even end by themselves. To avoid this, make sure
+        to call :meth:`cancel_all` first.
 
-        This method may also block, if one of the tasks blocks while catching a `asyncio.CancelledError` or if any of
-        the callbacks registered for a task blocks for whatever reason.
+        This method may also block, if one of the tasks blocks while catching
+        a `asyncio.CancelledError` or if any of the callbacks registered for
+        a task blocks for whatever reason.
 
         Args:
             return_exceptions (optional): Passed directly into `gather`.
@@ -620,7 +679,9 @@ class BaseTaskPool:
 
     async def until_closed(self) -> bool:
         """
-        Waits until the pool has been closed. (This method itself does **not** close the pool, but blocks until then.)
+        Waits until the pool has been closed.
+
+        This method itself does **not** close the pool, but blocks until then.
 
         Returns:
             `True` once the pool is closed.
@@ -632,20 +693,25 @@ class TaskPool(BaseTaskPool):
     """
     General purpose task pool class.
 
-    Attempts to emulate part of the interface of `multiprocessing.pool.Pool` from the stdlib.
+    Attempts to emulate part of the interface of `multiprocessing.pool.Pool`
+    from the stdlib.
 
-    A `TaskPool` instance can manage an arbitrary number of concurrent tasks from any coroutine function.
-    Tasks in the pool can all belong to the same coroutine function,
-    but they can also come from any number of different and unrelated coroutine functions.
+    A `TaskPool` instance can manage an arbitrary number of concurrent tasks
+    from any coroutine function. Tasks in the pool can all belong to the same
+    coroutine function, but they can also come from any number of different and
+    unrelated coroutine functions.
 
-    As long as there is room in the pool, more tasks can be added. (By default, there is no pool size limit.)
-    Each task started in the pool receives a unique ID, which can be used to cancel specific tasks at any moment.
+    As long as there is room in the pool, more tasks can be added. (By default,
+    there is no pool size limit.) Each task started in the pool receives a
+    unique ID, which can be used to cancel specific tasks at any moment.
 
     Adding tasks blocks **only if** the pool is full at that moment.
     """
 
     def _generate_group_name(
-        self, prefix: str, coroutine_function: CoroutineFunc
+        self,
+        prefix: str,
+        coroutine_function: CoroutineFunc,
     ) -> str:
         """
         Creates a unique task group identifier.
@@ -655,8 +721,9 @@ class TaskPool(BaseTaskPool):
             coroutine_function: The function representing the task group.
 
         Returns:
-            The constructed '{prefix}-{name}-group-{idx}' string to name a task group.
-            (With `name` being the name of the `coroutine_function` and `idx` being an incrementing index.)
+            '{prefix}-{name}-group-{idx}' string to name a task group.
+            (With `name` being the name of the `coroutine_function` and
+            `idx` being an incrementing index.)
         """
         base_name = f"{prefix}-{coroutine_function.__name__}-group"
         i = 0
@@ -677,15 +744,17 @@ class TaskPool(BaseTaskPool):
         cancel_callback: CancelCB | None = None,
     ) -> None:
         """
-        Creates coroutines with the supplied arguments and runs them as new tasks in the pool.
+        Runs coroutines with the supplied arguments as new tasks in the pool.
 
-        This method blocks, **only if** the pool has not enough room to accommodate `num` new tasks.
+        This method blocks, **only if** the pool has not enough room to
+        accommodate `num` new tasks.
 
         Args:
             group_name:
                 Name of the task group to add the new tasks to.
             func:
-                The coroutine function to be run in `num` tasks within the task pool.
+                The coroutine function to be run in `num` tasks within the
+                task pool.
             args (optional):
                 The positional arguments to pass into each function call.
             kwargs (optional):
@@ -705,9 +774,10 @@ class TaskPool(BaseTaskPool):
             try:
                 coroutine = func(*args, **kwargs)
             except Exception as e:
-                # This means there was probably something wrong with the function arguments.
+                # Probably something wrong with the function arguments.
                 log.exception(
-                    "%s occurred in group '%s' while trying to create coroutine: %s(*%s, **%s)",
+                    "%s occurred in group '%s' while trying to "
+                    "create coroutine: %s(*%s, **%s)",
                     str(e.__class__.__name__),
                     group_name,
                     func.__name__,
@@ -723,10 +793,12 @@ class TaskPool(BaseTaskPool):
                     cancel_callback=cancel_callback,
                 )
             except CancelledError:
-                # Either the task group or all tasks were cancelled, so this meta tasks is not supposed to spawn any
-                # more tasks and can return immediately.
+                # Either the task group or all tasks were cancelled, so this
+                # meta tasks is not supposed to spawn any more tasks and can
+                # return immediately.
                 log.debug(
-                    "Cancelled group '%s' after %s out of %s tasks have been spawned",
+                    "Cancelled group '%s' after %s out of %s "
+                    "tasks have been spawned",
                     group_name,
                     i,
                     num,
@@ -747,31 +819,38 @@ class TaskPool(BaseTaskPool):
         """
         Creates tasks with the supplied arguments to be run in the pool.
 
-        Each coroutine looks like `func(*args, **kwargs)`, meaning the `args` and `kwargs` are unpacked and passed
-        into `func` before creating each task, and this is done `num` times.
+        Each coroutine looks like `func(*args, **kwargs)`, meaning the `args`
+        and `kwargs` are unpacked and passed into `func` before creating each
+        task, and this is done `num` times.
 
         All the new tasks are added to the same task group.
 
-        Because this method delegates the spawning of the tasks to a meta task, it **never blocks**. However, just
-        because this method returns immediately, this does not mean that any task was started or that any number of
-        tasks will start soon, as this is solely determined by the :attr:`BaseTaskPool.pool_size` and `num`.
+        Because this method delegates the spawning of the tasks to a meta task,
+        it **never blocks**. However, just because this method returns
+        immediately, this does not mean that any task was started or that any
+        number of tasks will start soon, as this is solely determined by the
+        :attr:`BaseTaskPool.pool_size` and `num`.
 
-        If the entire task group is cancelled before `num` tasks have spawned, since the meta task is cancelled first,
-        the number of tasks spawned will end up being less than `num`.
+        If the entire task group is cancelled before `num` tasks have spawned,
+        since the meta task is cancelled first, the number of tasks spawned will
+        end up being less than `num`.
 
         Args:
             func:
-                The coroutine function to use for spawning the new tasks within the task pool.
+                The coroutine function to use for spawning the new tasks within
+                the task pool.
             args (optional):
                 The positional arguments to pass into each function call.
             kwargs (optional):
                 The keyword-arguments to pass into each function call.
             num (optional):
-                The number of tasks to spawn with the specified parameters. Defaults to 1.
+                The number of tasks to spawn with the specified parameters.
+                Defaults to 1.
             group_name (optional):
-                Name of the task group to add the new tasks to. By default, a unique name is constructed in the form
-                :code:`'apply-{name}-group-{idx}'` (with `name` being the name of the `func` and `idx` being an
-                incrementing index).
+                Name of the task group to add the new tasks to. By default, a
+                unique name is constructed in the form
+                :code:`'apply-{name}-group-{idx}'` (with `name` being the name
+                of the `func` and `idx` being an incrementing index).
             end_callback (optional):
                 A callback to execute after a task has ended.
                 It is run with the task's ID as its only positional argument.
@@ -780,7 +859,7 @@ class TaskPool(BaseTaskPool):
                 It is run with the task's ID as its only positional argument.
 
         Returns:
-            The name of the newly created group (see the `group_name` parameter).
+            Name of the newly created group (see the `group_name` parameter).
 
         Raises:
             `PoolIsClosed`: The pool is closed.
@@ -814,7 +893,8 @@ class TaskPool(BaseTaskPool):
 
     @staticmethod
     def _get_map_end_callback(
-        map_semaphore: Semaphore, actual_end_callback: EndCB | None
+        map_semaphore: Semaphore,
+        actual_end_callback: EndCB | None,
     ) -> EndCB:
         """Returns a wrapped `end_callback` for each :meth:`_arg_consumer` task that releases the `map_semaphore`."""
 
@@ -836,30 +916,38 @@ class TaskPool(BaseTaskPool):
         cancel_callback: CancelCB | None = None,
     ) -> None:
         """
-        Consumes arguments from :meth:`_map` and keeps a limited number of tasks working on them.
+        Consumes arguments and keeps a limited number of tasks working on them.
 
-        `num_concurrent` acts as the limiting value of an internal semaphore, which must be acquired before a new task
-        can be started, and which must be released when one of these tasks ends.
+        `num_concurrent` acts as the limiting value of an internal semaphore,
+        which must be acquired before a new task can be started, and which must
+        be released when one of these tasks ends.
 
         Intended to be run as a meta task of a specific group.
 
         Args:
             group_name:
-                Name of the associated task group; passed into :meth:`_start_task`.
+                Name of the associated task group; passed into
+                :meth:`_start_task`.
             num_concurrent:
-                The maximum number new tasks spawned by this method to run concurrently.
+                The maximum number new tasks spawned by this method to run
+                concurrently.
             func:
-                The coroutine function to use for spawning the new tasks within the task pool.
+                The coroutine function to use for spawning the new tasks within
+                the task pool.
             arg_iter:
-                The iterable of arguments; each element is to be passed into a `func` call when spawning a new task.
+                The iterable of arguments; each element is to be passed into a
+                `func` call when spawning a new task.
             arg_stars (optional):
-                Whether or not to unpack an element from `arg_queue` using stars; must be 0, 1, or 2.
+                Whether or not to unpack an element from `arg_queue` using
+                stars; must be 0, 1, or 2.
             end_callback (optional):
-                The actual callback specified to execute after the task (and the next one) has ended.
-                It is run with the task's ID as its only positional argument.
+                The actual callback specified to execute after the task (and the
+                next one) has ended. It is run with the task's ID as its only
+                positional argument.
             cancel_callback (optional):
-                The callback that was specified to execute after cancellation of the task (and the next one).
-                It is run with the task's ID as its only positional argument.
+                The callback that was specified to execute after cancellation of
+                the task (and the next one). It is run with the task's ID as
+                its only positional argument.
         """
         semaphore = Semaphore(num_concurrent)
         release_cb = self._get_map_end_callback(
@@ -870,9 +958,10 @@ class TaskPool(BaseTaskPool):
             try:
                 coroutine = star_function(func, next_arg, arg_stars=arg_stars)
             except Exception as e:
-                # This means there was probably something wrong with the function arguments.
+                # Probably something wrong with the function arguments.
                 log.exception(
-                    "%s occurred in group '%s' while trying to create coroutine: %s(%s%s)",
+                    "%s occurred in group '%s' while trying to "
+                    "create coroutine: %s(%s%s)",
                     str(e.__class__.__name__),
                     group_name,
                     func.__name__,
@@ -881,8 +970,9 @@ class TaskPool(BaseTaskPool):
                 )
                 continue
             try:
-                # When the number of running tasks spawned by this method reaches the specified maximum,
-                # this next line will block, until one of them ends and releases the semaphore.
+                # When the number of running tasks spawned by this method
+                # reaches the specified maximum, this next line will block,
+                # until one of them ends and releases the semaphore.
                 semaphore_acquired = await semaphore.acquire()
                 await self._start_task(
                     coroutine,
@@ -892,8 +982,10 @@ class TaskPool(BaseTaskPool):
                     cancel_callback=cancel_callback,
                 )
             except CancelledError:
-                # Either the task group or all tasks were cancelled, so this meta tasks is not supposed to spawn any
-                # more tasks and can return immediately. (This means we drop `arg_iter` without consuming it fully.)
+                # Either the task group or all tasks were cancelled, so this
+                # meta tasks is not supposed to spawn any more tasks and can
+                # return immediately.
+                # (This means we drop `arg_iter` without consuming it fully.)
                 log.debug(
                     "Cancelled group '%s' after %s tasks have been spawned",
                     group_name,
@@ -916,37 +1008,48 @@ class TaskPool(BaseTaskPool):
         cancel_callback: CancelCB | None = None,
     ) -> None:
         """
-        Creates coroutines with arguments from the supplied iterable and runs them as new tasks in the pool.
+        Creates coroutines and runs them as new tasks in the pool.
 
-        Each coroutine looks like `func(arg)`, `func(*arg)`, or `func(**arg)`, `arg` being taken from `arg_iter`.
-        The method is a task-based equivalent of the `multiprocessing.pool.Pool.map` method.
+        Each coroutine looks like `func(arg)`, `func(*arg)`, or `func(**arg)`,
+        `arg` being taken from `arg_iter`. The method is a task-based equivalent
+        of the `multiprocessing.pool.Pool.map` method.
 
         All the new tasks are added to the same task group.
 
-        `num_concurrent` determines the (maximum) number of tasks spawned this way that shall be running concurrently at
-        any given moment in time. As soon as one task from this method call ends, it triggers the start of a new task
-        (assuming there is room in the pool), which consumes the next element from the arguments iterable. If the size
-        of the pool never imposes a limit, this ensures that the number of tasks spawned and running concurrently is
-        always equal to `num_concurrent` (except for when `arg_iter` is exhausted of course).
+        `num_concurrent` determines the (maximum) number of tasks spawned this
+        way that shall be running concurrently at any given moment in time.
+        As soon as one task from this method call ends, it triggers the start of
+        a new task (assuming there is room in the pool), which consumes the next
+        element from the arguments iterable. If the size of the pool never
+        imposes a limit, this ensures that the number of tasks spawned and
+        running concurrently is always equal to `num_concurrent` (except for
+        when `arg_iter` is exhausted of course).
 
-        Because this method delegates the spawning of the tasks to a meta task, it **never blocks**. However, just
-        because this method returns immediately, this does not mean that any task was started or that any number of
-        tasks will start soon, as this is solely determined by the :attr:`BaseTaskPool.pool_size` and `num_concurrent`.
+        Because this method delegates the spawning of the tasks to a meta task,
+        it **never blocks**. However, just because this method returns
+        immediately, this does not mean that any task was started or that any
+        number of tasks will start soon, as this is solely determined by the
+        :attr:`BaseTaskPool.pool_size` and `num_concurrent`.
 
-        If the entire task group is cancelled, the meta task is cancelled first, which means that `arg_iter` may be
-        abandoned before being fully consumed (if that is even possible).
+        If the entire task group is cancelled, the meta task is cancelled first,
+        which means that `arg_iter` may be abandoned before being fully consumed
+        (if that is even possible).
 
         Args:
             group_name:
-                Name of the task group to add the new tasks to. It must be a name that doesn't exist yet.
+                Name of the task group to add the new tasks to.
+                It must be a name that doesn't exist yet.
             num_concurrent:
                 The number new tasks spawned by this method to run concurrently.
             func:
-                The coroutine function to use for spawning the new tasks within the task pool.
+                The coroutine function to use for spawning the new tasks within
+                the task pool.
             arg_iter:
-                The iterable of arguments; each element is to be passed into a `func` call when spawning a new task.
+                The iterable of arguments; each element is to be passed into a
+                `func` call when spawning a new task.
             arg_stars:
-                Whether or not to unpack an element from `args_iter` using stars; must be 0, 1, or 2.
+                Whether or not to unpack an element from `args_iter` using
+                stars; must be 0, 1, or 2.
             end_callback (optional):
                 A callback to execute after a task has ended.
                 It is run with the task's ID as its only positional argument.
@@ -955,8 +1058,10 @@ class TaskPool(BaseTaskPool):
                 It is run with the task's ID as its only positional argument.
 
         Raises:
-            `ValueError`: `num_concurrent` is less than 1.
-            `asyncio_taskpool.exceptions.InvalidGroupName`: A group named `group_name` exists in the pool.
+            `ValueError`:
+                `num_concurrent` is less than 1.
+            `asyncio_taskpool.exceptions.InvalidGroupName`:
+                A group named `group_name` exists in the pool.
         """
         self._check_start(function=func)
         if num_concurrent < 1:
@@ -991,37 +1096,49 @@ class TaskPool(BaseTaskPool):
         cancel_callback: CancelCB | None = None,
     ) -> str:
         """
-        Creates coroutines with arguments from the supplied iterable and runs them as new tasks in the pool.
+        Creates coroutines and runs them as new tasks in the pool.
 
-        Each coroutine looks like `func(arg)`, `arg` being an element taken from `arg_iter`. The method is a task-based
-        equivalent of the `multiprocessing.pool.Pool.map` method.
+        Each coroutine looks like `func(arg)`, `arg` being an element taken
+        from `arg_iter`. The method is a task-based equivalent of the
+        `multiprocessing.pool.Pool.map` method.
 
         All the new tasks are added to the same task group.
 
-        `num_concurrent` determines the (maximum) number of tasks spawned this way that shall be running concurrently at
-        any given moment in time. As soon as one task from this method call ends, it triggers the start of a new task
-        (assuming there is room in the pool), which consumes the next element from the arguments iterable. If the size
-        of the pool never imposes a limit, this ensures that the number of tasks spawned and running concurrently is
-        always equal to `num_concurrent` (except for when `arg_iter` is exhausted of course).
+        `num_concurrent` determines the (maximum) number of tasks spawned this
+        way that shall be running concurrently at any given moment in time.
+        As soon as one task from this method call ends, it triggers the start of
+        a new task (assuming there is room in the pool), which consumes the next
+        element from the arguments iterable. If the size of the pool never
+        imposes a limit, this ensures that the number of tasks spawned and
+        running concurrently is always equal to `num_concurrent` (except for
+        when `arg_iter` is exhausted of course).
 
-        Because this method delegates the spawning of the tasks to a meta task, it **never blocks**. However, just
-        because this method returns immediately, this does not mean that any task was started or that any number of
-        tasks will start soon, as this is solely determined by the :attr:`BaseTaskPool.pool_size` and `num_concurrent`.
+        Because this method delegates the spawning of the tasks to a meta task,
+        it **never blocks**. However, just because this method returns
+        immediately, this does not mean that any task was started or that any
+        number of tasks will start soon, as this is solely determined by the
+        :attr:`BaseTaskPool.pool_size` and `num_concurrent`.
 
-        If the entire task group is cancelled, the meta task is cancelled first, which means that `arg_iter` may be
-        abandoned before being fully consumed (if that is even possible).
+        If the entire task group is cancelled, the meta task is cancelled first,
+        which means that `arg_iter` may be abandoned before being fully consumed
+        (if that is even possible).
 
         Args:
             func:
-                The coroutine function to use for spawning the new tasks within the task pool.
+                The coroutine function to use for spawning the new tasks within
+                the task pool.
             arg_iter:
-                The iterable of arguments; each argument is to be passed into a `func` call when spawning a new task.
+                The iterable of arguments; each argument is to be passed into
+                a `func` call when spawning a new task.
             num_concurrent (optional):
-                The number new tasks spawned by this method to run concurrently. Defaults to 1.
+                The number new tasks spawned by this method to run concurrently.
+                Defaults to 1.
             group_name (optional):
-                Name of the task group to add the new tasks to. If provided, it must be a name that doesn't exist yet.
-                By default, a unique name is constructed in the form :code:`'map-{name}-group-{idx}'`
-                (with `name` being the name of the `func` and `idx` being an incrementing index).
+                Name of the task group to add the new tasks to. If provided,
+                it must be a name that doesn't exist yet. By default, a unique
+                name is constructed in the form :code:`'map-{name}-group-{idx}'`
+                (with `name` being the name of the `func` and `idx` being an
+                incrementing index).
             end_callback (optional):
                 A callback to execute after a task has ended.
                 It is run with the task's ID as its only positional argument.
@@ -1030,7 +1147,7 @@ class TaskPool(BaseTaskPool):
                 It is run with the task's ID as its only positional argument.
 
         Returns:
-            The name of the newly created group (see the `group_name` parameter).
+            The name of the newly created group (see `group_name` parameter).
 
         Raises:
             `PoolIsClosed`: The pool is closed.
@@ -1062,15 +1179,17 @@ class TaskPool(BaseTaskPool):
         cancel_callback: CancelCB | None = None,
     ) -> str:
         """
-        Creates coroutines with arguments from the supplied iterable and runs them as new tasks in the pool.
+        Creates coroutines and runs them as new tasks in the pool.
 
-        Like :meth:`map` except that the elements of `args_iter` are expected to be iterables themselves to be unpacked
-        as positional arguments to the function.
-        Each coroutine then looks like `func(*args)`, `args` being an element from `args_iter`.
+        Like :meth:`map` except that the elements of `args_iter` are expected
+        to be iterables themselves to be unpacked as positional arguments to
+        the function. Each coroutine then looks like `func(*args)`,
+        `args` being an element from `args_iter`.
 
         Returns:
-            The name of the newly created group in the form :code:`'starmap-{name}-group-{index}'`
-            (with `name` being the name of the `func` and `idx` being an incrementing index).
+            The name of the newly created group in the form
+            :code:`'starmap-{name}-group-{index}'` (with `name` being the name
+            of the `func` and `idx` being an incrementing index).
         """
         if group_name is None:
             group_name = self._generate_group_name("starmap", func)
@@ -1095,15 +1214,17 @@ class TaskPool(BaseTaskPool):
         cancel_callback: CancelCB | None = None,
     ) -> str:
         """
-        Creates coroutines with arguments from the supplied iterable and runs them as new tasks in the pool.
+        Creates coroutines and runs them as new tasks in the pool.
 
-        Like :meth:`map` except that the elements of `kwargs_iter` are expected to be iterables themselves to be
-        unpacked as keyword-arguments to the function.
-        Each coroutine then looks like `func(**kwargs)`, `kwargs` being an element from `kwargs_iter`.
+        Like :meth:`map` except that the elements of `kwargs_iter` are expected
+        to be iterables themselves to be unpacked as keyword-arguments to the
+        function. Each coroutine then looks like `func(**kwargs)`,
+        `kwargs` being an element from `kwargs_iter`.
 
         Returns:
-            The name of the newly created group in the form :code:`'doublestarmap-{name}-group-{index}'`
-            (with `name` being the name of the `func` and `idx` being an incrementing index).
+            The name of the newly created group in the form
+            :code:`'doublestarmap-{name}-group-{index}'` (with `name` being the
+            name of the `func` and `idx` being an incrementing index).
         """
         if group_name is None:
             group_name = self._generate_group_name("doublestarmap", func)
@@ -1123,15 +1244,18 @@ class SimpleTaskPool(BaseTaskPool):
     """
     Simplified task pool class.
 
-    A `SimpleTaskPool` instance can manage an arbitrary number of concurrent tasks,
-    but they **must** come from a single coroutine function, called with the same arguments.
+    A `SimpleTaskPool` instance can manage an arbitrary number of concurrent
+    tasks, but they **must** come from a single coroutine function, called with
+    the same arguments.
 
     The coroutine function and its arguments are defined upon initialization.
 
-    As long as there is room in the pool, more tasks can be added. (By default, there is no pool size limit.)
-    Each task started in the pool receives a unique ID, which can be used to cancel specific tasks at any moment.
-    However, since all tasks come from the same function-arguments-combination, the specificity of the `cancel()` method
-    is probably unnecessary. Instead, a simpler :meth:`stop` method is introduced.
+    As long as there is room in the pool, more tasks can be added. (By default,
+    there is no pool size limit.) Each task started in the pool receives a
+    unique ID, which can be used to cancel specific tasks at any moment.
+    However, since all tasks come from the same function-arguments-combination,
+    the specificity of the `cancel()` method is probably unnecessary.
+    Instead, a simpler :meth:`stop` method is introduced.
 
     Adding tasks blocks **only if** the pool is full at that moment.
     """
@@ -1163,7 +1287,7 @@ class SimpleTaskPool(BaseTaskPool):
                 A callback to execute after cancellation of a task.
                 It is run with the task's ID as its only positional argument.
             pool_size (optional):
-                The maximum number of tasks allowed to run concurrently in the pool
+                Maximum number of tasks allowed to run concurrently in the pool
             name (optional):
                 An optional name for the pool.
 
@@ -1191,9 +1315,10 @@ class SimpleTaskPool(BaseTaskPool):
             try:
                 coroutine = self._func(*self._args, **self._kwargs)
             except Exception as e:
-                # This means there was probably something wrong with the function arguments.
+                # Probably something wrong with the function arguments.
                 log.exception(
-                    "%s occurred in '%s' while trying to create coroutine: %s(*%s, **%s)",
+                    "%s occurred in '%s' while trying to "
+                    "create coroutine: %s(*%s, **%s)",
                     str(e.__class__.__name__),
                     str(self),
                     self._func.__name__,
@@ -1209,10 +1334,12 @@ class SimpleTaskPool(BaseTaskPool):
                     cancel_callback=self._cancel_callback,
                 )
             except CancelledError:
-                # Either the task group or all tasks were cancelled, so this meta tasks is not supposed to spawn any
-                # more tasks and can return immediately.
+                # Either the task group or all tasks were cancelled, so this
+                # meta tasks is not supposed to spawn any more tasks and can
+                # return immediately.
                 log.debug(
-                    "Cancelled group '%s' after %s out of %s tasks have been spawned",
+                    "Cancelled group '%s' after %s out of %s "
+                    "tasks have been spawned",
                     group_name,
                     i,
                     num,
@@ -1224,18 +1351,22 @@ class SimpleTaskPool(BaseTaskPool):
         """
         Starts specified number of new tasks in the pool as a new group.
 
-        Because this method delegates the spawning of the tasks to a meta task, it **never blocks**. However, just
-        because this method returns immediately, this does not mean that any task was started or that any number of
-        tasks will start soon, as this is solely determined by the :attr:`BaseTaskPool.pool_size` and `num`.
+        Because this method delegates the spawning of the tasks to a meta task,
+        it **never blocks**. However, just because this method returns
+        immediately, this does not mean that any task was started or that any
+        number of tasks will start soon, as this is solely determined by the
+        :attr:`BaseTaskPool.pool_size` and `num`.
 
-        If the entire task group is cancelled before `num` tasks have spawned, since the meta task is cancelled first,
-        the number of tasks spawned will end up being less than `num`.
+        If the entire task group is cancelled before `num` tasks have spawned,
+        since the meta task is cancelled first, the number of tasks spawned will
+        end up being less than `num`.
 
         Args:
             num: The number of new tasks to start.
 
         Returns:
-            The name of the newly created task group in the form :code:`'start-group-{idx}'`
+            The name of the newly created task group in the form
+            :code:`'start-group-{idx}'`
             (with `idx` being an incrementing index).
         """
         self._check_start(function=self._func)
@@ -1252,18 +1383,25 @@ class SimpleTaskPool(BaseTaskPool):
         """
         Cancels specified number of tasks in the pool and returns their IDs.
 
-        The tasks are canceled in LIFO order, meaning tasks started later will be stopped before those started earlier.
+        The tasks are canceled in LIFO order, meaning tasks started later will
+        be stopped before those started earlier.
 
         Args:
-            num: The number of tasks to cancel; if `num` >= :attr:`BaseTaskPool.num_running`, all tasks are cancelled.
+            num:
+                The number of tasks to cancel;
+                if `num` >= :attr:`BaseTaskPool.num_running`,
+                all tasks are cancelled.
 
         Returns:
-            List of IDs of the tasks that have been cancelled (in the order they were cancelled).
+            List of IDs of the tasks that have been cancelled
+            (in the order they were cancelled).
         """
         ids = []
         for i, task_id in enumerate(reversed(self._tasks_running)):
             if i >= num:
-                break  # We got the desired number of task IDs, there may well be more tasks left to keep running
+                # We got the desired number of task IDs,
+                # there may well be more tasks left to keep running
+                break
             ids.append(task_id)
         self.cancel(*ids)
         return ids

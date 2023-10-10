@@ -30,25 +30,31 @@ class ControlClient(ABC):
     """
     Abstract base class for a simple implementation of a pool control client.
 
-    Since the server's control interface is simply expecting commands to be sent, any process able to connect to the
-    TCP or UNIX socket and issue the relevant commands (and optionally read the responses) will work just as well.
+    Since the server control interface is simply expecting commands to be sent,
+    any process able to connect to the TCP or UNIX socket and issue the relevant
+    commands (and optionally read the responses) will work just as well.
     This is a minimal working implementation.
     """
 
     @staticmethod
     def _client_info() -> dict[str, Any]:
-        """Returns a dictionary of client information relevant for the handshake with the server."""
+        """Returns the handshake-relevant client information as a dictionary."""
         return {CLIENT_INFO.TERMINAL_WIDTH: shutil.get_terminal_size().columns}
 
     @abstractmethod
     async def _open_connection(self, **kwargs: Any) -> ClientConnT:
         """
-        Tries to connect to a socket using the provided arguments and return the associated reader-writer-pair.
+        Tries to connect to a socket using the provided arguments.
 
-        This method will be invoked by the public `start()` method with the pre-defined internal `_conn_kwargs`
-        (unpacked) as keyword-arguments.
-        This method should return either a tuple of `asyncio.StreamReader` and `asyncio.StreamWriter` or a tuple of
-        `None` and `None`, if it failed to establish the defined connection.
+        This method will be invoked by the public `start()` method with the
+        pre-defined internal `_conn_kwargs` (unpacked) as keyword-arguments.
+        This method should return either a tuple of `asyncio.StreamReader` and
+        `asyncio.StreamWriter` or a tuple of `None` and `None`, if it failed to
+        establish the defined connection.
+
+        Returns:
+            The associated `StreamReader`-`StreamWriter`-pair, if successful;
+            `None, None`, if unsuccessful.
         """
         raise NotImplementedError
 
@@ -58,16 +64,20 @@ class ControlClient(ABC):
         self._connected: bool = False
 
     async def _server_handshake(
-        self, reader: StreamReader, writer: StreamWriter
+        self,
+        reader: StreamReader,
+        writer: StreamWriter,
     ) -> None:
         """
-        Performs the first interaction with the server providing it with the necessary client information.
+        Provides the server with the necessary client information.
 
         Upon completion, the server's info is printed.
 
         Args:
-            reader: The `asyncio.StreamReader` returned by the `_open_connection()` method
-            writer: The `asyncio.StreamWriter` returned by the `_open_connection()` method
+            reader:
+                The `asyncio.StreamReader` returned by `_open_connection`
+            writer:
+                The `asyncio.StreamWriter` returned by `_open_connection`
         """
         self._connected = True
         writer.write(json.dumps(self._client_info()).encode())
@@ -80,15 +90,17 @@ class ControlClient(ABC):
 
     def _get_command(self, writer: StreamWriter) -> str | None:
         """
-        Prompts the user for input and either returns it (after cleaning it up) or `None` in special cases.
+        Prompts the user for input and returns it (after cleaning it up).
 
         Args:
-            writer: The `asyncio.StreamWriter` returned by the `_open_connection()` method
+            writer:
+                The `asyncio.StreamWriter` returned by `_open_connection`
 
         Returns:
-            `None`, if either `Ctrl+C` was hit, an empty or whitespace-only string was entered, or the user wants the
-            client to disconnect; otherwise, returns the user's input, stripped of leading and trailing spaces and
-            converted to lowercase.
+            `None`, if either `Ctrl+C` was hit, an empty or whitespace-only
+            string was entered, or the user wants the client to disconnect;
+            otherwise, returns the user's input, stripped of leading and
+            trailing spaces and converted to lowercase.
         """
         try:
             cmd = input("> ").strip().lower()
@@ -108,17 +120,23 @@ class ControlClient(ABC):
         return cmd or None  # will be None if `cmd` is an empty string
 
     async def _interact(
-        self, reader: StreamReader, writer: StreamWriter
+        self,
+        reader: StreamReader,
+        writer: StreamWriter,
     ) -> None:
         """
-        Reacts to the user's command, potentially performing a back-and-forth interaction with the server.
+        Reacts to the user's command, performing an interaction with the server.
 
-        If `_get_command` returns `None`, this may imply that the client disconnected, but may also just be `Ctrl+C`.
-        If an actual command is retrieved, it is written to the stream, a response is awaited and eventually printed.
+        If `_get_command` returns `None`, this may imply that the client
+        disconnected, but may also just be `Ctrl+C`.
+        If an actual command is retrieved, it is written to the stream,
+        a response is awaited and eventually printed.
 
         Args:
-            reader: The `asyncio.StreamReader` returned by the `_open_connection()` method
-            writer: The `asyncio.StreamWriter` returned by the `_open_connection()` method
+            reader:
+                The `asyncio.StreamReader` returned by `_open_connection`
+            writer:
+                The `asyncio.StreamWriter` returned by `_open_connection`
         """
         cmd = self._get_command(writer)
         if cmd is None:
@@ -139,11 +157,13 @@ class ControlClient(ABC):
         """
         Opens connection, performs handshake, and enters interaction loop.
 
-        An input prompt is presented to the user and any input is sent (encoded) to the connected server.
-        One exception is the :const:`CLIENT_EXIT` command (equivalent to Ctrl+D), which merely closes the connection.
+        An input prompt is presented to the user and any input is sent (encoded)
+        to the connected server. One exception is the :const:`CLIENT_EXIT`
+        command (equivalent to Ctrl+D), which merely closes the connection.
 
-        If the connection can not be established, an error message is printed to `stderr` and the method returns.
-        If either the exit command is issued or the connection to the server is lost during the interaction loop,
+        If the connection can not be established, an error message is printed to
+        `stderr` and the method returns. If either the exit command is issued or
+        the connection to the server is lost during the interaction loop,
         the method returns and prints out a disconnected-message.
         """
         reader, writer = await self._open_connection(**self._conn_kwargs)
@@ -157,10 +177,10 @@ class ControlClient(ABC):
 
 
 class TCPControlClient(ControlClient):
-    """Task pool control client for connecting to a :class:`TCPControlServer`."""
+    """Pool control client for connecting to a :class:`TCPControlServer`."""
 
     def __init__(self, host: str, port: int | str, **conn_kwargs: Any) -> None:
-        """`host` and `port` are expected as non-optional connection arguments."""
+        """`host` and `port` are non-optional connection arguments."""
         self._host = host
         self._port = port
         super().__init__(**conn_kwargs)
@@ -169,8 +189,8 @@ class TCPControlClient(ControlClient):
         """
         Wrapper around the `asyncio.open_connection` function.
 
-        Returns a tuple of `None` and `None`, if the connection can not be established;
-        otherwise, the stream-reader and -writer tuple is returned.
+        Returns a tuple of `None` and `None`, if the connection can not be
+        established; otherwise, the reader-writer-tuple is returned.
         """
         try:
             return await open_connection(self._host, self._port, **kwargs)
@@ -180,7 +200,7 @@ class TCPControlClient(ControlClient):
 
 
 class UnixControlClient(ControlClient):
-    """Task pool control client for connecting to a :class:`UnixControlServer`."""
+    """Pool control client for connecting to a :class:`UnixControlServer`."""
 
     def __init__(self, socket_path: PathT, **conn_kwargs: Any) -> None:
         """`socket_path` is expected as a non-optional connection argument."""
@@ -194,8 +214,8 @@ class UnixControlClient(ControlClient):
         """
         Wrapper around the `asyncio.open_unix_connection` function.
 
-        Returns a tuple of `None` and `None`, if the socket is not found at the pre-defined path;
-        otherwise, the stream-reader and -writer tuple is returned.
+        Returns a tuple of `None` and `None`, if the socket is not found at the
+        pre-defined path; otherwise, the reader-writer-tuple is returned.
         """
         try:
             return await self._open_unix_connection(self._socket_path, **kwargs)

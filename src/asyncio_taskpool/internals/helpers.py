@@ -1,5 +1,7 @@
 """
-Miscellaneous helper functions. None of these should be considered part of the public API.
+Miscellaneous helper functions.
+
+None of these should be considered part of the public API.
 """
 
 from __future__ import annotations
@@ -41,7 +43,9 @@ async def execute_optional(
 
 @overload
 async def execute_optional(
-    function: object, args: object = (), kwargs: object = None
+    function: object,
+    args: object = (),
+    kwargs: object = None,
 ) -> None:
     ...
 
@@ -56,7 +60,7 @@ async def execute_optional(
 
     Args:
         function:
-            Any callable that accepts the provided positional and keyword-arguments.
+            Callable that accepts the provided positional and keyword-arguments.
             If it is a coroutine function, it will be awaited.
             If it is not a callable, nothing is returned.
         *args (optional):
@@ -65,7 +69,8 @@ async def execute_optional(
             Keyword-arguments to pass to `function`.
 
     Returns:
-        Whatever `function` returns (possibly after being awaited) or `None` if `function` is not callable.
+        Whatever `function` returns (possibly after being awaited) or
+        `None` if `function` is not callable.
     """
     if not callable(function):
         return None
@@ -87,20 +92,26 @@ def star_function(
 
 @overload
 def star_function(
-    function: Callable[..., _R], arg: Iterable[object], arg_stars: Literal[1]
+    function: Callable[..., _R],
+    arg: Iterable[object],
+    arg_stars: Literal[1],
 ) -> _R:
     ...
 
 
 @overload
 def star_function(
-    function: Callable[..., _R], arg: object, arg_stars: Literal[0] = 0
+    function: Callable[..., _R],
+    arg: object,
+    arg_stars: Literal[0] = 0,
 ) -> _R:
     ...
 
 
 def star_function(
-    function: Callable[..., _R], arg: Any, arg_stars: int = 0
+    function: Callable[..., _R],
+    arg: Any,
+    arg_stars: int = 0,
 ) -> _R:
     """
     Calls `function` passing `arg` to it, optionally unpacking it first.
@@ -109,14 +120,17 @@ def star_function(
         function:
             Any callable that accepts the provided argument(s).
         arg:
-            The single positional argument that `function` expects; in this case `arg_stars` should be 0.
-            Or the iterable of positional arguments that `function` expects; in this case `arg_stars` should be 1.
-            Or the mapping of keyword-arguments that `function` expects; in this case `arg_stars` should be 2.
+            The single positional argument that `function` expects; in this case
+            `arg_stars` should be 0. Or the iterable of positional arguments
+            that `function` expects; in this case `arg_stars` should be 1.
+            Or the mapping of keyword-arguments that `function` expects; in this
+            case `arg_stars` should be 2.
         arg_stars (optional):
-            Determines if and how to unpack `arg`.
-            0 means no unpacking, i.e. `arg` is passed into `function` directly as `function(arg)`.
-            1 means unpacking to an arbitrary number of positional arguments, i.e. as `function(*arg)`.
-            2 means unpacking to an arbitrary number of keyword-arguments, i.e. as `function(**arg)`.
+            Determines if and how to unpack `arg`. 0 means no unpacking,
+            i.e. `arg` is passed into `function` directly as `function(arg)`.
+            1 means unpacking to an arbitrary number of positional arguments,
+            i.e. as `function(*arg)`. 2 means unpacking to an arbitrary number
+            of keyword-arguments, i.e. as `function(**arg)`.
 
     Returns:
         Whatever `function` returns.
@@ -136,7 +150,7 @@ def star_function(
 
 
 def get_first_doc_line(obj: object) -> str | None:
-    """Takes an object and returns the first (non-empty) line of its docstring."""
+    """Takes an object and returns the first non-empty line of its docstring."""
     doc = getdoc(obj)
     if doc is None:
         return None
@@ -149,18 +163,19 @@ async def return_or_exception(
     **kwargs: _P.kwargs,
 ) -> _R | Exception:
     """
-    Returns the output of a function or the exception thrown during its execution.
+    Returns the output of a function or the exception thrown during its call.
 
     Args:
         _function_to_execute:
-            Any callable that accepts the provided positional and keyword-arguments.
+            Callable that accepts the provided positional and keyword-arguments.
         *args (optional):
             Positional arguments to pass to `_function_to_execute`.
         **kwargs (optional):
             Keyword-arguments to pass to `_function_to_execute`.
 
     Returns:
-        Whatever `_function_to_execute` returns or throws. (An exception is not raised, but returned!)
+        Whatever `_function_to_execute` returns or throws.
+        (An exception is not raised, but returned!)
     """
     try:
         if iscoroutinefunction(_function_to_execute):
@@ -177,7 +192,8 @@ def resolve_dotted_path(dotted_path: str) -> object:
     """
     Resolves a dotted path to a global object and returns that object.
 
-    Algorithm shamelessly stolen from the `logging.config` module from the standard library.
+    Algorithm shamelessly stolen from the `logging.config` module from the
+    standard library.
     """
     names = dotted_path.split(".")
     module_name = names.pop(0)
@@ -193,10 +209,11 @@ def resolve_dotted_path(dotted_path: str) -> object:
 
 
 class ClassMethodWorkaround:
-    """Dirty workaround to make the `@classmethod` decorator work with properties."""
+    """Dirty workaround to make `@classmethod` work with properties."""
 
     def __init__(
-        self, method_or_property: Callable[..., Any] | property
+        self,
+        method_or_property: Callable[..., Any] | property,
     ) -> None:
         if isinstance(method_or_property, property):
             assert (

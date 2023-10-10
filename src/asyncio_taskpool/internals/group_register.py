@@ -17,9 +17,10 @@ class TaskGroupRegister(MutableSet[int]):
     """
     Combines the interface of a regular `set` with that of the `asyncio.Lock`.
 
-    Serves simultaneously as a container of IDs of tasks that belong to the same group, and as a mechanism for
-    preventing race conditions within a task group. The lock should be acquired before cancelling the entire group of
-    tasks, as well as before starting a task within the group.
+    Serves simultaneously as a container of IDs of tasks that belong to the same
+    group and as a mechanism for preventing race conditions within a task group.
+    The lock should be acquired before cancelling the entire group of tasks,
+    as well as before starting a task within the group.
     """
 
     def __init__(self, *task_ids: int) -> None:
@@ -55,7 +56,7 @@ class TaskGroupRegister(MutableSet[int]):
         self._lock.release()
 
     async def __aenter__(self) -> None:
-        """Provides the asynchronous context manager syntax `async with ... :` when using the lock."""
+        """Acquires the internal lock."""
         await self._lock.acquire()
         return None
 
@@ -65,5 +66,5 @@ class TaskGroupRegister(MutableSet[int]):
         exc_val: _E | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        """Provides the asynchronous context manager syntax `async with ... :` when using the lock."""
+        """Releases the internal lock."""
         self._lock.release()

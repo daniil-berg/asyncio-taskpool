@@ -30,8 +30,9 @@ class ControlServer(ABC, Generic[ClientT]):
     """
     Abstract base class for a task pool control server.
 
-    This class acts as a wrapper around an async server instance and initializes a
-    :class:`ControlSession <asyncio_taskpool.control.session.ControlSession>` once a client connects to it.
+    This class acts as a wrapper around an async server instance and initializes
+    a :class:`ControlSession <asyncio_taskpool.control.session.ControlSession>`
+    once a client connects to it.
     The interface is defined within the session class.
     """
 
@@ -46,14 +47,15 @@ class ControlServer(ABC, Generic[ClientT]):
     def __init__(self, pool: AnyTaskPoolT, **server_kwargs: Any) -> None:
         """
         Merely sets internal attributes, but does not start the server yet.
-        The task pool must be passed here and can not be set/changed afterwards. This means a control server is always
-        tied to one specific task pool.
+
+        The task pool must be passed here and can not be set/changed afterwards.
+        This means a control server is always tied to one specific task pool.
 
         Args:
             pool:
                 An instance of a `BaseTaskPool` subclass to tie the server to.
             **server_kwargs (optional):
-                Keyword arguments that will be passed into the function that starts the server.
+                Will be passed into the function that starts the server.
         """
         self._pool: AnyTaskPoolT = pool
         self._server_kwargs = server_kwargs
@@ -71,11 +73,15 @@ class ControlServer(ABC, Generic[ClientT]):
         return self._server.is_serving()
 
     async def _client_connected_cb(
-        self, reader: StreamReader, writer: StreamWriter
+        self,
+        reader: StreamReader,
+        writer: StreamWriter,
     ) -> None:
         """
-        The universal client callback that will be passed into the `_get_server_instance` method.
-        Instantiates a control session, performs the client handshake, and enters the session's `listen` loop.
+        Universal client callback passed into the `_get_server_instance` method.
+
+        Instantiates a control session, performs the client handshake, and
+        enters the session's `listen` loop.
         """
         session = ControlSession(self, reader, writer)
         await session.client_handshake()
@@ -83,17 +89,20 @@ class ControlServer(ABC, Generic[ClientT]):
 
     @abstractmethod
     async def _get_server_instance(
-        self, client_connected_cb: ConnectedCallbackT, **kwargs: Any
+        self,
+        client_connected_cb: ConnectedCallbackT,
+        **kwargs: Any,
     ) -> AbstractServer:
         """
-        Initializes, starts, and returns an async server instance (Unix or TCP type).
+        Initializes, starts, and returns an async server instance.
 
         Args:
             client_connected_cb:
-                The callback for when a client connects to the server (as per `asyncio.start_server` or
-                `asyncio.start_unix_server`); will always be the internal `_client_connected_cb` method.
+                The callback for when a client connects to the server (as per
+                `asyncio.start_server` or `asyncio.start_unix_server`);
+                will always be the internal `_client_connected_cb` method.
             **kwargs (optional):
-                Keyword arguments to pass into the function that starts the server.
+                Passed into the function that starts the server.
 
         Returns:
             The running server object (a type of `asyncio.Server`).
@@ -102,14 +111,16 @@ class ControlServer(ABC, Generic[ClientT]):
 
     @abstractmethod
     def _final_callback(self) -> None:
-        """The method to run after the server's `serve_forever` methods ends for whatever reason."""
+        """Runs after the server's `serve_forever` methods ends."""
         raise NotImplementedError
 
     async def _serve_forever(self) -> None:
         """
         To be run as an `asyncio.Task` by the following method.
-        Serves as a wrapper around the the `asyncio.Server.serve_forever` method that ensures that the `_final_callback`
-        method is called, when the former method ends for whatever reason.
+
+        Serves as a wrapper around the the `asyncio.Server.serve_forever` method
+        that ensures that the `_final_callback` method is called, when the
+        former method ends for whatever reason.
         """
         assert self._server is not None, "Server not instantiated yet"
         try:
@@ -124,10 +135,10 @@ class ControlServer(ABC, Generic[ClientT]):
         """
         Starts the server and begins listening to client connections.
 
-        It should never block because the serving will be performed in a separate task.
+        Should never block because serving will be performed in a separate task.
 
         Returns:
-            The forever serving task. To stop the server, this task should be cancelled.
+            The serving task. To stop the server, that task should be cancelled.
         """
         log.debug("Starting %s...", self.__class__.__name__)
         self._server = await self._get_server_instance(
@@ -154,7 +165,9 @@ class TCPControlServer(ControlServer[TCPControlClient]):
         super().__init__(pool, **server_kwargs)
 
     async def _get_server_instance(
-        self, client_connected_cb: ConnectedCallbackT, **kwargs: Any
+        self,
+        client_connected_cb: ConnectedCallbackT,
+        **kwargs: Any,
     ) -> AbstractServer:
         server = await start_server(
             client_connected_cb, self._host, self._port, **kwargs
@@ -172,7 +185,10 @@ class UnixControlServer(ControlServer[UnixControlClient]):
     _client_class = UnixControlClient
 
     def __init__(
-        self, pool: AnyTaskPoolT, socket_path: PathT, **server_kwargs: Any
+        self,
+        pool: AnyTaskPoolT,
+        socket_path: PathT,
+        **server_kwargs: Any,
     ) -> None:
         """`socket_path` is expected as a non-optional server argument."""
         from asyncio.streams import start_unix_server
@@ -182,7 +198,9 @@ class UnixControlServer(ControlServer[UnixControlClient]):
         super().__init__(pool, **server_kwargs)
 
     async def _get_server_instance(
-        self, client_connected_cb: ConnectedCallbackT, **kwargs: Any
+        self,
+        client_connected_cb: ConnectedCallbackT,
+        **kwargs: Any,
     ) -> AbstractServer:
         server = await self._start_unix_server(
             client_connected_cb, self._socket_path, **kwargs
