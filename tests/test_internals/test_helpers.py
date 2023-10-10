@@ -1,24 +1,9 @@
-__author__ = "Daniil Fajnberg"
-__copyright__ = "Copyright © 2022 Daniil Fajnberg"
-__license__ = """GNU LGPLv3.0
-
-This file is part of asyncio-taskpool.
-
-asyncio-taskpool is free software: you can redistribute it and/or modify it under the terms of
-version 3.0 of the GNU Lesser General Public License as published by the Free Software Foundation.
-
-asyncio-taskpool is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
-without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
-See the GNU Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public License along with asyncio-taskpool. 
-If not, see <https://www.gnu.org/licenses/>."""
-
-__doc__ = """
+"""
 Unittests for the `asyncio_taskpool.helpers` module.
 """
 
 import importlib
+from typing import Any, Tuple, cast
 from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import MagicMock, AsyncMock, NonCallableMagicMock, call, patch
 
@@ -28,10 +13,9 @@ from asyncio_taskpool.internals import helpers
 
 class HelpersTestCase(IsolatedAsyncioTestCase):
 
-    async def test_execute_optional(self):
+    async def test_execute_optional(self) -> None:
         f, args, kwargs = NonCallableMagicMock(), [1, 2], None
-        a = [f, args, kwargs]  # to avoid IDE nagging
-        self.assertIsNone(await helpers.execute_optional(*a))
+        self.assertIsNone(await helpers.execute_optional(f, args, kwargs))
 
         expected_output = 'foo'
         f = MagicMock(return_value=expected_output)
@@ -51,38 +35,42 @@ class HelpersTestCase(IsolatedAsyncioTestCase):
         self.assertEqual(expected_output, output)
         f.assert_awaited_once_with(*args, **kwargs)
 
-    def test_star_function(self):
+    def test_star_function(self) -> None:
         expected_output = 'bar'
-        f = MagicMock(return_value=expected_output)
+        mock_inner_call = MagicMock(return_value=expected_output)
+        def f(arg: Tuple[int, int, int]) -> str:
+            return cast(str, mock_inner_call(arg))
         a = (1, 2, 3)
-        stars = 0
-        output = helpers.star_function(f, a, stars)
+        output = helpers.star_function(f, a, 0)
         self.assertEqual(expected_output, output)
-        f.assert_called_once_with(a)
+        mock_inner_call.assert_called_once_with(a)
 
-        f.reset_mock()
+        mock_inner_call.reset_mock()
 
-        stars = 1
-        output = helpers.star_function(f, a, stars)
+        def g(x: int, y: int, z: int) -> str:
+            return cast(str, mock_inner_call(x, y, z))
+        output = helpers.star_function(g, a, 1)
         self.assertEqual(expected_output, output)
-        f.assert_called_once_with(*a)
+        mock_inner_call.assert_called_once_with(*a)
 
-        f.reset_mock()
+        mock_inner_call.reset_mock()
 
-        a = {'a': 1, 'b': 2}
-        stars = 2
-        output = helpers.star_function(f, a, stars)
+        def h(x: int, y: int) -> str:
+            return cast(str, mock_inner_call(x=x, y=y))
+        kw = {'x': 1, 'y': 2}
+        output = helpers.star_function(h, kw, 2)
         self.assertEqual(expected_output, output)
-        f.assert_called_once_with(**a)
+        mock_inner_call.assert_called_once_with(**kw)
 
         with self.assertRaises(ValueError):
-            helpers.star_function(f, a, 3)
+            helpers.star_function(f, a, 3)  # type: ignore[call-overload]
         with self.assertRaises(ValueError):
-            helpers.star_function(f, a, -1)
+            helpers.star_function(f, a, -1)  # type: ignore[call-overload]
         with self.assertRaises(ValueError):
-            helpers.star_function(f, a, 123456789)
+            helpers.star_function(f, a, 123456789)  # type: ignore[call-overload]
 
-    def test_get_first_doc_line(self):
+    def test_get_first_doc_line(self) -> None:
+        self.assertIsNone(helpers.get_first_doc_line(lambda: "foo"))
         expected_output = 'foo bar baz'
         mock_obj = MagicMock(__doc__=f"""{expected_output} 
         something else
@@ -92,7 +80,7 @@ class HelpersTestCase(IsolatedAsyncioTestCase):
         output = helpers.get_first_doc_line(mock_obj)
         self.assertEqual(expected_output, output)
 
-    async def test_return_or_exception(self):
+    async def test_return_or_exception(self) -> None:
         expected_output = '420'
         mock_func = AsyncMock(return_value=expected_output)
         args = (1, 3, 5)
@@ -114,7 +102,7 @@ class HelpersTestCase(IsolatedAsyncioTestCase):
         self.assertEqual(test_exception, output)
         mock_func.assert_called_once_with(*args, **kwargs)
 
-    def test_resolve_dotted_path(self):
+    def test_resolve_dotted_path(self) -> None:
         from logging import WARNING
         from urllib.request import urlopen
         self.assertEqual(WARNING, helpers.resolve_dotted_path('logging.WARNING'))
@@ -126,9 +114,9 @@ class HelpersTestCase(IsolatedAsyncioTestCase):
 
 
 class ClassMethodWorkaroundTestCase(TestCase):
-    def test_init(self):
-        def func(): return 'foo'
-        def getter(): return 'bar'
+    def test_init(self) -> None:
+        def func(_cls: object) -> str: return 'foo'
+        def getter(_cls: object) -> str: return 'bar'
         prop = property(getter)
         instance = helpers.ClassMethodWorkaround(func)
         self.assertIs(func, instance._getter)
@@ -136,8 +124,8 @@ class ClassMethodWorkaroundTestCase(TestCase):
         self.assertIs(getter, instance._getter)
 
     @patch.object(helpers.ClassMethodWorkaround, '__init__', return_value=None)
-    def test_get(self, _mock_init: MagicMock):
-        def func(x: MagicMock): return x.__name__
+    def test_get(self, _mock_init: MagicMock) -> None:
+        def func(x: MagicMock) -> Any: return x.__name__
         instance = helpers.ClassMethodWorkaround(MagicMock())
         instance._getter = func
         obj, cls = None, MagicMock
@@ -150,11 +138,10 @@ class ClassMethodWorkaroundTestCase(TestCase):
         output = instance.__get__(obj, cls)
         self.assertEqual(expected_output, output)
 
-        cls = None
-        output = instance.__get__(obj, cls)
+        output = instance.__get__(obj, None)
         self.assertEqual(expected_output, output)
 
-    def test_correct_class(self):
+    def test_correct_class(self) -> None:
         is_older_python = constants.PYTHON_BEFORE_39
         try:
             constants.PYTHON_BEFORE_39 = True

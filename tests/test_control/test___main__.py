@@ -8,7 +8,7 @@ from asyncio_taskpool.control import __main__ as module
 
 class CLITestCase(IsolatedAsyncioTestCase):
 
-    def test_parse_cli(self):
+    def test_parse_cli(self) -> None:
         socket_path = '/some/path/to.sock'
         args = [module.UNIX, socket_path]
         expected_kwargs = {
@@ -33,13 +33,13 @@ class CLITestCase(IsolatedAsyncioTestCase):
                 module.parse_cli(['invalid', 'foo', 'bar'])
 
     @patch.object(module, 'parse_cli')
-    async def test_main(self, mock_parse_cli: MagicMock):
+    async def test_main(self, mock_parse_cli: MagicMock) -> None:
         mock_client_start = AsyncMock()
         mock_client = MagicMock(start=mock_client_start)
         mock_client_cls = MagicMock(return_value=mock_client)
         mock_client_kwargs = {'foo': 123, 'bar': 456, 'baz': 789}
         mock_parse_cli.return_value = {module.CLIENT_CLASS: mock_client_cls, **mock_client_kwargs}
-        self.assertIsNone(await module.main())
+        await module.main()
         mock_parse_cli.assert_called_once_with()
         mock_client_cls.assert_called_once_with(**mock_client_kwargs)
         mock_client_start.assert_awaited_once_with()

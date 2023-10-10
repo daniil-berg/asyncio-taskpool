@@ -1,20 +1,4 @@
-__author__ = "Daniil Fajnberg"
-__copyright__ = "Copyright © 2022 Daniil Fajnberg"
-__license__ = """GNU LGPLv3.0
-
-This file is part of asyncio-taskpool.
-
-asyncio-taskpool is free software: you can redistribute it and/or modify it under the terms of
-version 3.0 of the GNU Lesser General Public License as published by the Free Software Foundation.
-
-asyncio-taskpool is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
-without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
-See the GNU Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public License along with asyncio-taskpool. 
-If not, see <https://www.gnu.org/licenses/>."""
-
-__doc__ = """
+"""
 Unittests for the `asyncio_taskpool.client` module.
 """
 
@@ -24,6 +8,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from typing import Any, Set
 from unittest import IsolatedAsyncioTestCase, skipIf
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
@@ -32,17 +17,18 @@ from asyncio_taskpool.internals.constants import CLIENT_INFO, SESSION_MSG_BYTES
 
 
 FOO, BAR = 'foo', 'bar'
+EMPTY_SET: Set[Any] = set()
 
 
 class ControlClientTestCase(IsolatedAsyncioTestCase):
 
     def setUp(self) -> None:
-        self.abstract_patcher = patch('asyncio_taskpool.control.client.ControlClient.__abstractmethods__', set())
+        self.abstract_patcher = patch.object(client.ControlClient, "__abstractmethods__", EMPTY_SET)
         self.print_patcher = patch.object(client, 'print')
         self.mock_abstract_methods = self.abstract_patcher.start()
         self.mock_print = self.print_patcher.start()
         self.kwargs = {FOO: 123, BAR: 456}
-        self.client = client.ControlClient(**self.kwargs)
+        self.client = client.ControlClient(**self.kwargs)  # type: ignore[abstract]
 
         self.mock_read = AsyncMock(return_value=FOO.encode())
         self.mock_write, self.mock_drain = MagicMock(), AsyncMock()
@@ -53,22 +39,22 @@ class ControlClientTestCase(IsolatedAsyncioTestCase):
         self.abstract_patcher.stop()
         self.print_patcher.stop()
 
-    def test_client_info(self):
+    def test_client_info(self) -> None:
         self.assertEqual({CLIENT_INFO.TERMINAL_WIDTH: shutil.get_terminal_size().columns},
                          client.ControlClient._client_info())
 
-    async def test_abstract(self):
+    async def test_abstract(self) -> None:
         with self.assertRaises(NotImplementedError):
             await self.client._open_connection(**self.kwargs)
 
-    def test_init(self):
+    def test_init(self) -> None:
         self.assertEqual(self.kwargs, self.client._conn_kwargs)
         self.assertFalse(self.client._connected)
 
     @patch.object(client.ControlClient, '_client_info')
-    async def test__server_handshake(self, mock__client_info: MagicMock):
+    async def test__server_handshake(self, mock__client_info: MagicMock) -> None:
         mock__client_info.return_value = mock_info = {FOO: 1, BAR: 9999}
-        self.assertIsNone(await self.client._server_handshake(self.mock_reader, self.mock_writer))
+        await self.client._server_handshake(self.mock_reader, self.mock_writer)
         self.assertTrue(self.client._connected)
         mock__client_info.assert_called_once_with()
         self.mock_write.assert_has_calls([call(json.dumps(mock_info).encode()), call(b'\n')])
@@ -80,7 +66,7 @@ class ControlClientTestCase(IsolatedAsyncioTestCase):
         ])
 
     @patch.object(client, 'input')
-    def test__get_command(self, mock_input: MagicMock):
+    def test__get_command(self, mock_input: MagicMock) -> None:
         self.client._connected = True
 
         mock_input.return_value = ' ' + FOO.upper() + ' '
@@ -107,11 +93,11 @@ class ControlClientTestCase(IsolatedAsyncioTestCase):
         self.assertFalse(self.client._connected)
 
     @patch.object(client.ControlClient, '_get_command')
-    async def test__interact(self, mock__get_command: MagicMock):
+    async def test__interact(self, mock__get_command: MagicMock) -> None:
         self.client._connected = True
 
         mock__get_command.return_value = None
-        self.assertIsNone(await self.client._interact(self.mock_reader, self.mock_writer))
+        await self.client._interact(self.mock_reader, self.mock_writer)
         self.mock_write.assert_not_called()
         self.mock_drain.assert_not_awaited()
         self.mock_read.assert_not_awaited()
@@ -120,7 +106,7 @@ class ControlClientTestCase(IsolatedAsyncioTestCase):
 
         mock__get_command.return_value = cmd = FOO + BAR + ' 123'
         self.mock_drain.side_effect = err = ConnectionError()
-        self.assertIsNone(await self.client._interact(self.mock_reader, self.mock_writer))
+        await self.client._interact(self.mock_reader, self.mock_writer)
         self.mock_write.assert_has_calls([call(cmd.encode()), call(b'\n')])
         self.mock_drain.assert_awaited_once_with()
         self.mock_read.assert_not_awaited()
@@ -132,7 +118,7 @@ class ControlClientTestCase(IsolatedAsyncioTestCase):
         self.mock_drain.reset_mock(side_effect=True)
         self.mock_print.reset_mock()
 
-        self.assertIsNone(await self.client._interact(self.mock_reader, self.mock_writer))
+        await self.client._interact(self.mock_reader, self.mock_writer)
         self.mock_write.assert_has_calls([call(cmd.encode()), call(b'\n')])
         self.mock_drain.assert_awaited_once_with()
         self.mock_read.assert_awaited_once_with(SESSION_MSG_BYTES)
@@ -143,9 +129,9 @@ class ControlClientTestCase(IsolatedAsyncioTestCase):
     @patch.object(client.ControlClient, '_server_handshake')
     @patch.object(client.ControlClient, '_open_connection')
     async def test_start(self, mock__open_connection: AsyncMock, mock__server_handshake: AsyncMock,
-                         mock__interact: AsyncMock):
+                         mock__interact: AsyncMock) -> None:
         mock__open_connection.return_value = None, None
-        self.assertIsNone(await self.client.start())
+        await self.client.start()
         mock__open_connection.assert_awaited_once_with(**self.kwargs)
         mock__server_handshake.assert_not_awaited()
         mock__interact.assert_not_awaited()
@@ -155,7 +141,7 @@ class ControlClientTestCase(IsolatedAsyncioTestCase):
         self.mock_print.reset_mock()
 
         mock__open_connection.return_value = self.mock_reader, self.mock_writer
-        self.assertIsNone(await self.client.start())
+        await self.client.start()
         mock__open_connection.assert_awaited_once_with(**self.kwargs)
         mock__server_handshake.assert_awaited_once_with(self.mock_reader, self.mock_writer)
         mock__interact.assert_not_awaited()
@@ -166,9 +152,10 @@ class ControlClientTestCase(IsolatedAsyncioTestCase):
         self.mock_print.reset_mock()
 
         self.client._connected = True
-        def disconnect(*_args, **_kwargs) -> None: self.client._connected = False
+        def disconnect(*_args: Any, **_kwargs: Any) -> None:
+            self.client._connected = False
         mock__interact.side_effect = disconnect
-        self.assertIsNone(await self.client.start())
+        await self.client.start()
         mock__open_connection.assert_awaited_once_with(**self.kwargs)
         mock__server_handshake.assert_awaited_once_with(self.mock_reader, self.mock_writer)
         mock__interact.assert_awaited_once_with(self.mock_reader, self.mock_writer)
@@ -187,14 +174,14 @@ class TCPControlClientTestCase(IsolatedAsyncioTestCase):
     def tearDown(self) -> None:
         self.base_init_patcher.stop()
 
-    def test_init(self):
+    def test_init(self) -> None:
         self.assertEqual(self.host, self.client._host)
         self.assertEqual(self.port, self.client._port)
         self.mock_base_init.assert_called_once_with(**self.kwargs)
 
     @patch.object(client, 'print')
     @patch.object(client, 'open_connection')
-    async def test__open_connection(self, mock_open_connection: AsyncMock, mock_print: MagicMock):
+    async def test__open_connection(self, mock_open_connection: AsyncMock, mock_print: MagicMock) -> None:
         mock_open_connection.return_value = expected_output = 'something'
         kwargs = {'a': 1, 'b': 2}
         output = await self.client._open_connection(**kwargs)
@@ -225,12 +212,12 @@ class UnixControlClientTestCase(IsolatedAsyncioTestCase):
     def tearDown(self) -> None:
         self.base_init_patcher.stop()
 
-    def test_init(self):
+    def test_init(self) -> None:
         self.assertEqual(Path(self.path), self.client._socket_path)
         self.mock_base_init.assert_called_once_with(**self.kwargs)
 
     @patch.object(client, 'print')
-    async def test__open_connection(self, mock_print: MagicMock):
+    async def test__open_connection(self, mock_print: MagicMock) -> None:
         expected_output = 'something'
         self.client._open_unix_connection = mock_open_unix_connection = AsyncMock(return_value=expected_output)
         kwargs = {'a': 1, 'b': 2}

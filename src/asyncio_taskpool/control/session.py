@@ -1,33 +1,17 @@
-__author__ = "Daniil Fajnberg"
-__copyright__ = "Copyright © 2022 Daniil Fajnberg"
-__license__ = """GNU LGPLv3.0
-
-This file is part of asyncio-taskpool.
-
-asyncio-taskpool is free software: you can redistribute it and/or modify it under the terms of
-version 3.0 of the GNU Lesser General Public License as published by the Free Software Foundation.
-
-asyncio-taskpool is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
-without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
-See the GNU Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public License along with asyncio-taskpool. 
-If not, see <https://www.gnu.org/licenses/>."""
-
-__doc__ = """
+"""
 Definition of the :class:`ControlSession` used by a :class:`ControlServer`.
 
 It should not be considered part of the public API.
 """
 
-
+from __future__ import annotations
 import logging
 import json
 from argparse import ArgumentError
 from asyncio.streams import StreamReader, StreamWriter
 from inspect import isfunction, signature
 from io import StringIO
-from typing import Callable, Optional, Union, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 from .parser import ControlParser
 from ..exceptions import CommandError, HelpRequested, ParserError
@@ -36,7 +20,7 @@ from ..internals.constants import CLIENT_INFO, CMD, CMD_OK
 from ..internals.helpers import return_or_exception
 
 if TYPE_CHECKING:
-    from .server import ControlServer
+    from .server import ControlServer, ClientT
 
 
 __all__ = ['ControlSession']
@@ -53,7 +37,7 @@ class ControlSession:
     A subclass of the standard :class:`argparse.ArgumentParser` is used to handle the input read from the stream.
     """
 
-    def __init__(self, server: 'ControlServer', reader: StreamReader, writer: StreamWriter) -> None:
+    def __init__(self, server: 'ControlServer[ClientT]', reader: StreamReader, writer: StreamWriter) -> None:
         """
         Connection to the control server should already been established.
 
@@ -69,15 +53,15 @@ class ControlSession:
             writer:
                 The `asyncio.StreamWriter` created when a client connected to the server.
         """
-        self._control_server: 'ControlServer' = server
-        self._pool: Union[TaskPool, SimpleTaskPool] = server.pool
+        self._control_server: 'ControlServer[ClientT]' = server
+        self._pool: TaskPool | SimpleTaskPool = server.pool
         self._client_class_name = server.client_class_name
         self._reader: StreamReader = reader
         self._writer: StreamWriter = writer
-        self._parser: Optional[ControlParser] = None
+        self._parser: ControlParser | None = None
         self._response_buffer: StringIO = StringIO()
 
-    async def _exec_method_and_respond(self, method: Callable, **kwargs) -> None:
+    async def _exec_method_and_respond(self, method: Callable[..., Any], **kwargs: Any) -> None:
         """
         Takes a pool method reference, executes it, and writes a response accordingly.
 
@@ -105,7 +89,7 @@ class ControlSession:
         output = await return_or_exception(method, *normal_pos, *var_pos, **kwargs)
         self._response_buffer.write(CMD_OK.decode() if output is None else str(output))
 
-    async def _exec_property_and_respond(self, prop: property, **kwargs) -> None:
+    async def _exec_property_and_respond(self, prop: property, **kwargs: Any) -> None:
         """
         Takes a pool property reference, executes its setter or getter, and writes a response accordingly.
 
@@ -120,10 +104,12 @@ class ControlSession:
                 executed and the response written to the stream will be its return value (as an encoded string).
         """
         if kwargs:
+            assert prop.fset is not None, "Property has not setter"
             log.debug("%s sets %s.%s", self._client_class_name, self._pool.__class__.__name__, prop.fset.__name__)
-            await return_or_exception(prop.fset, self._pool, **kwargs)
+            await return_or_exception(prop.fset, self._pool, **kwargs)  # type: ignore[call-arg]
             self._response_buffer.write(CMD_OK.decode())
         else:
+            assert prop.fget is not None, "Property has not getter"
             log.debug("%s gets %s.%s", self._client_class_name, self._pool.__class__.__name__, prop.fget.__name__)
             self._response_buffer.write(str(await return_or_exception(prop.fget, self._pool)))
 
@@ -161,6 +147,7 @@ class ControlSession:
         Args:
             msg: The non-empty string read from the client stream.
         """
+        assert self._parser is not None, "Parser not initialized yet"
         try:
             kwargs = vars(self._parser.parse_args(msg.split(' ')))
         except ArgumentError as e:

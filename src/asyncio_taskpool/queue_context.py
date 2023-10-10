@@ -1,32 +1,25 @@
-__author__ = "Daniil Fajnberg"
-__copyright__ = "Copyright © 2022 Daniil Fajnberg"
-__license__ = """GNU LGPLv3.0
-
-This file is part of asyncio-taskpool.
-
-asyncio-taskpool is free software: you can redistribute it and/or modify it under the terms of
-version 3.0 of the GNU Lesser General Public License as published by the Free Software Foundation.
-
-asyncio-taskpool is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
-without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
-See the GNU Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public License along with asyncio-taskpool. 
-If not, see <https://www.gnu.org/licenses/>."""
-
-__doc__ = """
+"""
 Definition of an :code:`asyncio.Queue` subclass with some small additions.
 """
 
-
+from __future__ import annotations
+import sys
 from asyncio.queues import Queue as _Queue
-from typing import Any
+from types import TracebackType
+from typing import TYPE_CHECKING, Any, Type, TypeVar
 
 
 __all__ = ['Queue']
 
+_E = TypeVar("_E", bound=BaseException)
+_T = TypeVar("_T")
 
-class Queue(_Queue):
+# Hack around the fact that in Python 3.8 `asyncio.Queue` is not generic:
+if not TYPE_CHECKING and sys.version_info < (3, 9):
+    _Queue.__class_getitem__ = lambda _: _Queue
+
+
+class Queue(_Queue[_T]):
     """
     Adds a little syntactic sugar to the :code:`asyncio.Queue`.
 
@@ -56,7 +49,7 @@ class Queue(_Queue):
         """
         return await self.get()
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(self, exc_type: Type[_E] | None, exc_val: _E | None, exc_tb: TracebackType | None) -> None:
         """
         Implements an asynchronous context manager for the queue.
 

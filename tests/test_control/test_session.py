@@ -1,32 +1,17 @@
-__author__ = "Daniil Fajnberg"
-__copyright__ = "Copyright © 2022 Daniil Fajnberg"
-__license__ = """GNU LGPLv3.0
-
-This file is part of asyncio-taskpool.
-
-asyncio-taskpool is free software: you can redistribute it and/or modify it under the terms of
-version 3.0 of the GNU Lesser General Public License as published by the Free Software Foundation.
-
-asyncio-taskpool is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
-without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
-See the GNU Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public License along with asyncio-taskpool. 
-If not, see <https://www.gnu.org/licenses/>."""
-
-__doc__ = """
+"""
 Unittests for the `asyncio_taskpool.session` module.
 """
 
-
+from __future__ import annotations
 import json
 from argparse import ArgumentError, Namespace
 from io import StringIO
+from typing import Any
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
 from asyncio_taskpool.control import session
-from asyncio_taskpool.internals.constants import CLIENT_INFO, CMD
+from asyncio_taskpool.internals.constants import CLIENT_INFO, CMD, CMD_OK
 from asyncio_taskpool.exceptions import HelpRequested
 from asyncio_taskpool.pool import SimpleTaskPool
 
@@ -55,7 +40,7 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         self.mock_writer = MagicMock()
         self.session = session.ControlSession(self.mock_server, self.mock_reader, self.mock_writer)
 
-    def test_init(self):
+    def test_init(self) -> None:
         self.assertEqual(self.mock_server, self.session._control_server)
         self.assertEqual(self.mock_pool, self.session._pool)
         self.assertEqual(self.mock_client_class_name, self.session._client_class_name)
@@ -65,39 +50,39 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         self.assertIsInstance(self.session._response_buffer, StringIO)
 
     @patch.object(session, 'return_or_exception')
-    async def test__exec_method_and_respond(self, mock_return_or_exception: AsyncMock):
-        def method(self, arg1, arg2, *var_args, **rest): pass
+    async def test__exec_method_and_respond(self, mock_return_or_exception: AsyncMock) -> None:
+        def method(self: Any, arg1: Any, arg2: Any, *var_args: Any, **rest: Any) -> None: pass
         test_arg1, test_arg2, test_var_args, test_rest = 123, 'xyz', [0.1, 0.2, 0.3], {'aaa': 1, 'bbb': 11}
         kwargs = {'arg1': test_arg1, 'arg2': test_arg2, 'var_args': test_var_args}
         mock_return_or_exception.return_value = None
-        self.assertIsNone(await self.session._exec_method_and_respond(method, **kwargs, **test_rest))
+        await self.session._exec_method_and_respond(method, **kwargs, **test_rest)
         mock_return_or_exception.assert_awaited_once_with(
             method, self.mock_pool, test_arg1, test_arg2, *test_var_args, **test_rest
         )
-        self.assertEqual(session.CMD_OK.decode(), self.session._response_buffer.getvalue())
+        self.assertEqual(CMD_OK.decode(), self.session._response_buffer.getvalue())
 
     @patch.object(session, 'return_or_exception')
-    async def test__exec_property_and_respond(self, mock_return_or_exception: AsyncMock):
-        def prop_get(_): pass
-        def prop_set(_): pass
+    async def test__exec_property_and_respond(self, mock_return_or_exception: AsyncMock) -> None:
+        def prop_get(_: Any) -> None: pass
+        def prop_set(_: Any, __: Any) -> None: pass
         prop = property(prop_get, prop_set)
         kwargs = {'value': 'something'}
         mock_return_or_exception.return_value = None
-        self.assertIsNone(await self.session._exec_property_and_respond(prop, **kwargs))
+        await self.session._exec_property_and_respond(prop, **kwargs)
         mock_return_or_exception.assert_awaited_once_with(prop_set, self.mock_pool, **kwargs)
-        self.assertEqual(session.CMD_OK.decode(), self.session._response_buffer.getvalue())
+        self.assertEqual(CMD_OK.decode(), self.session._response_buffer.getvalue())
 
         mock_return_or_exception.reset_mock()
         self.session._response_buffer.seek(0)
         self.session._response_buffer.truncate()
 
         mock_return_or_exception.return_value = val = 420.69
-        self.assertIsNone(await self.session._exec_property_and_respond(prop))
+        await self.session._exec_property_and_respond(prop)
         mock_return_or_exception.assert_awaited_once_with(prop_get, self.mock_pool)
         self.assertEqual(str(val), self.session._response_buffer.getvalue())
 
     @patch.object(session, 'ControlParser')
-    async def test_client_handshake(self, mock_parser_cls: MagicMock):
+    async def test_client_handshake(self, mock_parser_cls: MagicMock) -> None:
         mock_add_subparsers, mock_add_class_commands = MagicMock(), MagicMock()
         mock_parser = MagicMock(add_subparsers=mock_add_subparsers, add_class_commands=mock_add_class_commands)
         mock_parser_cls.return_value = mock_parser
@@ -116,7 +101,7 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
             'title': "Commands",
             'metavar': "(A command followed by '-h' or '--help' will show command-specific help.)"
         }
-        self.assertIsNone(await self.session.client_handshake())
+        await self.session.client_handshake()
         self.assertEqual(mock_parser, self.session._parser)
         mock_readline.assert_awaited_once_with()
         mock_parser_cls.assert_called_once_with(**expected_parser_kwargs)
@@ -128,14 +113,14 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
     @patch.object(session.ControlSession, '_exec_property_and_respond')
     @patch.object(session.ControlSession, '_exec_method_and_respond')
     async def test__parse_command(self, mock__exec_method_and_respond: AsyncMock,
-                                  mock__exec_property_and_respond: AsyncMock):
-        def method(_): pass
+                                  mock__exec_property_and_respond: AsyncMock) -> None:
+        def method(_: Any) -> None: pass
         prop = property(method)
         msg = 'asdf asd as a'
         kwargs = {FOO: BAR, 'hello': 'python'}
         mock_parse_args = MagicMock(return_value=Namespace(**{CMD: method}, **kwargs))
         self.session._parser = MagicMock(parse_args=mock_parse_args)
-        self.assertIsNone(await self.session._parse_command(msg))
+        await self.session._parse_command(msg)
         mock_parse_args.assert_called_once_with(msg.split(' '))
         self.assertEqual('', self.session._response_buffer.getvalue())
         mock__exec_method_and_respond.assert_awaited_once_with(method, **kwargs)
@@ -145,7 +130,7 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         mock_parse_args.reset_mock()
 
         mock_parse_args.return_value = Namespace(**{CMD: prop}, **kwargs)
-        self.assertIsNone(await self.session._parse_command(msg))
+        await self.session._parse_command(msg)
         mock_parse_args.assert_called_once_with(msg.split(' '))
         self.assertEqual('', self.session._response_buffer.getvalue())
         mock__exec_method_and_respond.assert_not_called()
@@ -156,9 +141,10 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
 
         bad_command = 'definitely not a function or property'
         mock_parse_args.return_value = Namespace(**{CMD: bad_command}, **kwargs)
+        exc: ArgumentError | MagicMock = MagicMock()
         with patch.object(session, 'CommandError') as cmd_err_cls:
-            cmd_err_cls.return_value = exc = MagicMock()
-            self.assertIsNone(await self.session._parse_command(msg))
+            cmd_err_cls.return_value = exc
+            await self.session._parse_command(msg)
             cmd_err_cls.assert_called_once_with(f"Unknown command object: {bad_command}")
         mock_parse_args.assert_called_once_with(msg.split(' '))
         mock__exec_method_and_respond.assert_not_called()
@@ -171,7 +157,7 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         self.session._response_buffer.truncate()
 
         mock_parse_args.side_effect = exc = ArgumentError(MagicMock(), "oops")
-        self.assertIsNone(await self.session._parse_command(msg))
+        await self.session._parse_command(msg)
         mock_parse_args.assert_called_once_with(msg.split(' '))
         self.assertEqual(str(exc), self.session._response_buffer.getvalue())
         mock__exec_method_and_respond.assert_not_awaited()
@@ -182,22 +168,22 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         self.session._response_buffer.truncate()
 
         mock_parse_args.side_effect = HelpRequested()
-        self.assertIsNone(await self.session._parse_command(msg))
+        await self.session._parse_command(msg)
         mock_parse_args.assert_called_once_with(msg.split(' '))
         self.assertEqual('', self.session._response_buffer.getvalue())
         mock__exec_method_and_respond.assert_not_awaited()
         mock__exec_property_and_respond.assert_not_awaited()
 
     @patch.object(session.ControlSession, '_parse_command')
-    async def test_listen(self, mock__parse_command: AsyncMock):
-        def make_reader_return_empty():
+    async def test_listen(self, mock__parse_command: AsyncMock) -> None:
+        def make_reader_return_empty() -> None:
             self.mock_reader.readline.return_value = b''
         self.mock_writer.drain = AsyncMock(side_effect=make_reader_return_empty)
         msg = "fascinating"
         self.mock_reader.readline = AsyncMock(return_value=f' {msg} '.encode())
         response = FOO + BAR + FOO
         self.session._response_buffer.write(response)
-        self.assertIsNone(await self.session.listen())
+        await self.session.listen()
         self.mock_reader.readline.assert_has_awaits([call(), call()])
         mock__parse_command.assert_awaited_once_with(msg)
         self.assertEqual('', self.session._response_buffer.getvalue())
@@ -210,7 +196,7 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         self.mock_writer.drain.reset_mock()
 
         self.mock_server.is_serving = MagicMock(return_value=False)
-        self.assertIsNone(await self.session.listen())
+        await self.session.listen()
         self.mock_reader.readline.assert_not_awaited()
         mock__parse_command.assert_not_awaited()
         self.mock_writer.write.assert_not_called()

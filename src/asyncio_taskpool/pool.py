@@ -1,20 +1,4 @@
-__author__ = "Daniil Fajnberg"
-__copyright__ = "Copyright © 2022 Daniil Fajnberg"
-__license__ = """GNU LGPLv3.0
-
-This file is part of asyncio-taskpool.
-
-asyncio-taskpool is free software: you can redistribute it and/or modify it under the terms of
-version 3.0 of the GNU Lesser General Public License as published by the Free Software Foundation.
-
-asyncio-taskpool is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
-without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
-See the GNU Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public License along with asyncio-taskpool. 
-If not, see <https://www.gnu.org/licenses/>."""
-
-__doc__ = """
+"""
 Definitions of the task pool classes.
 
 The :class:`BaseTaskPool` is a parent class and not intended for direct use.
@@ -26,7 +10,7 @@ to dynamically control the **number** of tasks running at any point in time.
 For further details about the classes check their respective documentation.
 """
 
-
+from __future__ import annotations
 import logging
 import warnings
 from asyncio.coroutines import iscoroutine, iscoroutinefunction
@@ -35,9 +19,10 @@ from asyncio.locks import Event, Semaphore
 from asyncio.tasks import Task, create_task, gather
 from contextlib import suppress
 from math import inf
-from typing import Any, Awaitable, Dict, Iterable, List, Set, Union
+from typing import Any, Awaitable, Callable, Coroutine, Dict, Iterable, List, Literal, Set, TypeVar, Union, cast
+from typing_extensions import ParamSpec
 
-from . import exceptions
+from .exceptions import AlreadyCancelled, AlreadyEnded, InvalidGroupName, InvalidTaskID, NotCoroutine, PoolIsClosed, PoolIsLocked
 from .internals.constants import DEFAULT_TASK_GROUP, PYTHON_BEFORE_39
 from .internals.group_register import TaskGroupRegister
 from .internals.helpers import execute_optional, star_function
@@ -51,6 +36,8 @@ __all__ = [
     'AnyTaskPoolT'
 ]
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 log = logging.getLogger(__name__)
 
@@ -65,7 +52,7 @@ class BaseTaskPool:
         cls._pools.append(pool)
         return len(cls._pools) - 1
 
-    def __init__(self, pool_size: int = inf, name: str = None) -> None:
+    def __init__(self, pool_size: float = inf, name: str | None = None) -> None:
         """Initializes the necessary internal attributes and adds the new pool to the general pools list."""
         # Initialize a counter for the total number of tasks started through the pool.
         self._num_started: int = 0
@@ -73,25 +60,25 @@ class BaseTaskPool:
         # Initialize flags; immutably set the name.
         self._locked: bool = False
         self._closed: Event = Event()
-        self._name: str = name
+        self._name: str | None = name
 
         # The following three dictionaries are the actual containers of the tasks controlled by the pool.
-        self._tasks_running: Dict[int, Task] = {}
-        self._tasks_cancelled: Dict[int, Task] = {}
-        self._tasks_ended: Dict[int, Task] = {}
+        self._tasks_running: Dict[int, Task[Any]] = {}
+        self._tasks_cancelled: Dict[int, Task[Any]] = {}
+        self._tasks_ended: Dict[int, Task[Any]] = {}
 
         # These next two attributes act as synchronisation primitives necessary for managing the pool.
         self._enough_room: Semaphore = Semaphore()
-        self._task_groups: Dict[str, TaskGroupRegister[int]] = {}
+        self._task_groups: Dict[str, TaskGroupRegister] = {}
 
         # Mapping task group names to sets of meta tasks, and a bucket for cancelled meta tasks.
-        self._group_meta_tasks_running: Dict[str, Set[Task]] = {}
-        self._meta_tasks_cancelled: Set[Task] = set()
+        self._group_meta_tasks_running: Dict[str, Set[Task[Any]]] = {}
+        self._meta_tasks_cancelled: Set[Task[Any]] = set()
 
         # Finish with method/functions calls that add the pool to the internal list of pools, set its initial size,
         # and issue a log message.
         self._idx: int = self._add_pool(self)
-        self.pool_size = pool_size
+        self.pool_size = pool_size  # type: ignore[assignment]
         log.debug("%s initialized", str(self))
 
     def __str__(self) -> str:
@@ -101,7 +88,7 @@ class BaseTaskPool:
     @property
     def pool_size(self) -> int:
         """Maximum number of concurrently running tasks allowed in the pool."""
-        return getattr(self._enough_room, '_value')
+        return cast(int, getattr(self._enough_room, '_value'))
 
     @pool_size.setter
     def pool_size(self, value: int) -> None:
@@ -189,15 +176,15 @@ class BaseTaskPool:
         Raises:
             `InvalidGroupName`: One of the specified`group_names` does not exist in the pool.
         """
-        ids = set()
+        ids: Set[int] = set()
         for name in group_names:
             try:
                 ids.update(self._task_groups[name])
             except KeyError:
-                raise exceptions.InvalidGroupName(f"No task group named {name} exists in this pool.")
+                raise InvalidGroupName(f"No task group named {name} exists in this pool.")
         return ids
 
-    def _check_start(self, *, awaitable: Awaitable = None, function: CoroutineFunc = None,
+    def _check_start(self, *, awaitable: Awaitable[Any] | None = None, function: Callable[..., Coroutine[Any, Any, Any]] | None = None,
                      ignore_lock: bool = False) -> None:
         """
         Checks necessary conditions for starting a task (group) in the pool.
@@ -218,19 +205,19 @@ class BaseTaskPool:
         """
         assert (awaitable is None) != (function is None)
         if awaitable and not iscoroutine(awaitable):
-            raise exceptions.NotCoroutine(f"Not awaitable: {awaitable}")
+            raise NotCoroutine(f"Not awaitable: {awaitable}")
         if function and not iscoroutinefunction(function):
-            raise exceptions.NotCoroutine(f"Not a coroutine function: {function}")
+            raise NotCoroutine(f"Not a coroutine function: {function}")
         if self._closed.is_set():
-            raise exceptions.PoolIsClosed("You must use another pool")
+            raise PoolIsClosed("You must use another pool")
         if self._locked and not ignore_lock:
-            raise exceptions.PoolIsLocked("Cannot start new tasks")
+            raise PoolIsLocked("Cannot start new tasks")
 
     def _task_name(self, task_id: int) -> str:
         """Returns a standardized name for a task with a specific `task_id`."""
         return f'{self}_Task-{task_id}'
 
-    async def _task_cancellation(self, task_id: int, custom_callback: CancelCB = None) -> None:
+    async def _task_cancellation(self, task_id: int, custom_callback: CancelCB | None = None) -> None:
         """
         Universal callback to be run upon any task in the pool being cancelled.
 
@@ -248,7 +235,7 @@ class BaseTaskPool:
         log.debug("Cancelled %s", self._task_name(task_id))
         await execute_optional(custom_callback, args=(task_id,))
 
-    async def _task_ending(self, task_id: int, custom_callback: EndCB = None) -> None:
+    async def _task_ending(self, task_id: int, custom_callback: EndCB | None = None) -> None:
         """
         Universal callback to be run upon any task in the pool ending its work.
 
@@ -270,8 +257,8 @@ class BaseTaskPool:
         log.info("Ended %s", self._task_name(task_id))
         await execute_optional(custom_callback, args=(task_id,))
 
-    async def _task_wrapper(self, awaitable: Awaitable, task_id: int, end_callback: EndCB = None,
-                            cancel_callback: CancelCB = None) -> Any:
+    async def _task_wrapper(self, awaitable: Awaitable[_R], task_id: int, end_callback: EndCB | None = None,
+                            cancel_callback: CancelCB | None = None) -> _R | None:
         """
         Universal wrapper around every task run in the pool.
 
@@ -297,11 +284,12 @@ class BaseTaskPool:
             return await awaitable
         except CancelledError:
             await self._task_cancellation(task_id, custom_callback=cancel_callback)
+            return None
         finally:
             await self._task_ending(task_id, custom_callback=end_callback)
 
-    async def _start_task(self, awaitable: Awaitable, group_name: str = DEFAULT_TASK_GROUP, ignore_lock: bool = False,
-                          end_callback: EndCB = None, cancel_callback: CancelCB = None) -> int:
+    async def _start_task(self, awaitable: Awaitable[Any], group_name: str = DEFAULT_TASK_GROUP, ignore_lock: bool = False,
+                          end_callback: EndCB | None = None, cancel_callback: CancelCB | None = None) -> int:
         """
         Starts a coroutine as a new task in the pool.
 
@@ -340,7 +328,7 @@ class BaseTaskPool:
             )
         return task_id
 
-    def _get_running_task(self, task_id: int) -> Task:
+    def _get_running_task(self, task_id: int) -> Task[Any]:
         """
         Gets a running task by its task ID.
 
@@ -356,13 +344,13 @@ class BaseTaskPool:
             return self._tasks_running[task_id]
         except KeyError:
             if self._tasks_cancelled.get(task_id):
-                raise exceptions.AlreadyCancelled(f"{self._task_name(task_id)} has been cancelled")
+                raise AlreadyCancelled(f"{self._task_name(task_id)} has been cancelled")
             if self._tasks_ended.get(task_id):
-                raise exceptions.AlreadyEnded(f"{self._task_name(task_id)} has finished running")
-            raise exceptions.InvalidTaskID(f"No task with ID {task_id} found in {self}")
+                raise AlreadyEnded(f"{self._task_name(task_id)} has finished running")
+            raise InvalidTaskID(f"No task with ID {task_id} found in {self}")
 
     @staticmethod
-    def _get_cancel_kw(msg: Union[str, None]) -> Dict[str, str]:
+    def _get_cancel_kw(msg: str | None) -> Dict[str, str]:
         """
         Returns a dictionary to unpack in a `Task.cancel()` method.
 
@@ -378,7 +366,7 @@ class BaseTaskPool:
             return {}
         return {'msg': msg}
 
-    def cancel(self, *task_ids: int, msg: str = None) -> None:
+    def cancel(self, *task_ids: int, msg: str | None = None) -> None:
         """
         Cancels the tasks with the specified IDs.
 
@@ -411,7 +399,7 @@ class BaseTaskPool:
         self._meta_tasks_cancelled.update(meta_tasks)
         log.debug("%s cancelled and forgot meta tasks from group %s", str(self), group_name)
 
-    def _cancel_and_remove_all_from_group(self, group_name: str, group_reg: TaskGroupRegister, **cancel_kw) -> None:
+    def _cancel_and_remove_all_from_group(self, group_name: str, group_reg: TaskGroupRegister, **cancel_kw: Any) -> None:
         """
         Removes all tasks from the specified group and cancels them.
 
@@ -430,7 +418,7 @@ class BaseTaskPool:
                 continue
         log.debug("%s cancelled tasks from group %s", str(self), group_name)
 
-    def cancel_group(self, group_name: str, msg: str = None) -> None:
+    def cancel_group(self, group_name: str, msg: str | None = None) -> None:
         """
         Cancels an entire group of tasks.
 
@@ -451,12 +439,12 @@ class BaseTaskPool:
         try:
             group_reg = self._task_groups.pop(group_name)
         except KeyError:
-            raise exceptions.InvalidGroupName(f"No task group named {group_name} exists in this pool.")
+            raise InvalidGroupName(f"No task group named {group_name} exists in this pool.")
         kw = self._get_cancel_kw(msg)
         self._cancel_and_remove_all_from_group(group_name, group_reg, **kw)
         log.debug("%s forgot task group %s", str(self), group_name)
 
-    def cancel_all(self, msg: str = None) -> None:
+    def cancel_all(self, msg: str | None = None) -> None:
         """
         Cancels all tasks still running within the pool (including meta tasks).
 
@@ -473,7 +461,7 @@ class BaseTaskPool:
             group_name, group_reg = self._task_groups.popitem()
             self._cancel_and_remove_all_from_group(group_name, group_reg, **kw)
 
-    def _pop_ended_meta_tasks(self) -> Set[Task]:
+    def _pop_ended_meta_tasks(self) -> Set[Task[Any]]:
         """
         Goes through all not-cancelled meta tasks, checks if they are done already, and returns those that are.
 
@@ -499,7 +487,7 @@ class BaseTaskPool:
             del self._group_meta_tasks_running[group_name]
         return ended_meta_tasks
 
-    async def flush(self, return_exceptions: bool = False):
+    async def flush(self, return_exceptions: bool = False) -> None:
         """
         Gathers (i.e. awaits) all ended/cancelled tasks in the pool.
 
@@ -520,7 +508,7 @@ class BaseTaskPool:
         self._tasks_ended.clear()
         self._tasks_cancelled.clear()
 
-    async def gather_and_close(self, return_exceptions: bool = False):
+    async def gather_and_close(self, return_exceptions: bool = False) -> None:
         """
         Gathers (i.e. awaits) **all** tasks in the pool, then closes it.
 
@@ -598,8 +586,8 @@ class TaskPool(BaseTaskPool):
                 return name
             i += 1
 
-    async def _apply_spawner(self, group_name: str, func: CoroutineFunc, args: ArgsT = (), kwargs: KwArgsT = None,
-                             num: int = 1, end_callback: EndCB = None, cancel_callback: CancelCB = None) -> None:
+    async def _apply_spawner(self, group_name: str, func: Callable[_P, Coroutine[_R, Any, Any]], args: _P.args = (), kwargs: _P.kwargs = None,
+                             num: int = 1, end_callback: EndCB | None = None, cancel_callback: CancelCB | None = None) -> None:
         """
         Creates coroutines with the supplied arguments and runs them as new tasks in the pool.
 
@@ -643,8 +631,8 @@ class TaskPool(BaseTaskPool):
                 coroutine.close()
                 return
 
-    def apply(self, func: CoroutineFunc, args: ArgsT = (), kwargs: KwArgsT = None, num: int = 1, group_name: str = None,
-              end_callback: EndCB = None, cancel_callback: CancelCB = None) -> str:
+    def apply(self, func: Callable[_P, Coroutine[_R, Any, Any]], args: _P.args = (), kwargs: _P.kwargs = None, num: int = 1, group_name: str | None = None,
+              end_callback: EndCB | None = None, cancel_callback: CancelCB | None = None) -> str:
         """
         Creates tasks with the supplied arguments to be run in the pool.
 
@@ -693,7 +681,7 @@ class TaskPool(BaseTaskPool):
         if group_name is None:
             group_name = self._generate_group_name('apply', func)
         if group_name in self._task_groups.keys():
-            raise exceptions.InvalidGroupName(f"Group named {group_name} already exists!")
+            raise InvalidGroupName(f"Group named {group_name} already exists!")
         self._task_groups.setdefault(group_name, TaskGroupRegister())
         meta_tasks = self._group_meta_tasks_running.setdefault(group_name, set())
         meta_tasks.add(create_task(self._apply_spawner(group_name, func, args, kwargs, num,
@@ -701,15 +689,16 @@ class TaskPool(BaseTaskPool):
         return group_name
 
     @staticmethod
-    def _get_map_end_callback(map_semaphore: Semaphore, actual_end_callback: EndCB) -> EndCB:
+    def _get_map_end_callback(map_semaphore: Semaphore, actual_end_callback: EndCB | None) -> EndCB:
         """Returns a wrapped `end_callback` for each :meth:`_arg_consumer` task that releases the `map_semaphore`."""
         async def release_callback(task_id: int) -> None:
             map_semaphore.release()
             await execute_optional(actual_end_callback, args=(task_id,))
         return release_callback
 
+    # TODO: See if it is possible to type this more precisely with overloads
     async def _arg_consumer(self, group_name: str, num_concurrent: int, func: CoroutineFunc, arg_iter: ArgsT,
-                            arg_stars: int, end_callback: EndCB = None, cancel_callback: CancelCB = None) -> None:
+                            arg_stars: Literal[0, 1, 2], end_callback: EndCB | None = None, cancel_callback: CancelCB | None = None) -> None:
         """
         Consumes arguments from :meth:`_map` and keeps a limited number of tasks working on them.
 
@@ -762,8 +751,9 @@ class TaskPool(BaseTaskPool):
                     semaphore.release()
                 return
 
-    def _map(self, group_name: str, num_concurrent: int, func: CoroutineFunc, arg_iter: ArgsT, arg_stars: int,
-             end_callback: EndCB = None, cancel_callback: CancelCB = None) -> None:
+    # TODO: See if it is possible to type this more precisely with overloads
+    def _map(self, group_name: str, num_concurrent: int, func: CoroutineFunc, arg_iter: ArgsT, arg_stars: Literal[0, 1, 2],
+             end_callback: EndCB | None = None, cancel_callback: CancelCB | None = None) -> None:
         """
         Creates coroutines with arguments from the supplied iterable and runs them as new tasks in the pool.
 
@@ -811,14 +801,14 @@ class TaskPool(BaseTaskPool):
         if num_concurrent < 1:
             raise ValueError("`num_concurrent` must be a positive integer.")
         if group_name in self._task_groups.keys():
-            raise exceptions.InvalidGroupName(f"Group named {group_name} already exists!")
+            raise InvalidGroupName(f"Group named {group_name} already exists!")
         self._task_groups[group_name] = TaskGroupRegister()
         meta_tasks = self._group_meta_tasks_running.setdefault(group_name, set())
         meta_tasks.add(create_task(self._arg_consumer(group_name, num_concurrent, func, arg_iter, arg_stars,
                                                       end_callback=end_callback, cancel_callback=cancel_callback)))
 
-    def map(self, func: CoroutineFunc, arg_iter: ArgsT, num_concurrent: int = 1, group_name: str = None,
-            end_callback: EndCB = None, cancel_callback: CancelCB = None) -> str:
+    def map(self, func: CoroutineFunc, arg_iter: ArgsT, num_concurrent: int = 1, group_name: str | None = None,
+            end_callback: EndCB | None = None, cancel_callback: CancelCB | None = None) -> str:
         """
         Creates coroutines with arguments from the supplied iterable and runs them as new tasks in the pool.
 
@@ -874,8 +864,8 @@ class TaskPool(BaseTaskPool):
                   end_callback=end_callback, cancel_callback=cancel_callback)
         return group_name
 
-    def starmap(self, func: CoroutineFunc, args_iter: Iterable[ArgsT], num_concurrent: int = 1, group_name: str = None,
-                end_callback: EndCB = None, cancel_callback: CancelCB = None) -> str:
+    def starmap(self, func: CoroutineFunc, args_iter: Iterable[ArgsT], num_concurrent: int = 1, group_name: str | None = None,
+                end_callback: EndCB | None = None, cancel_callback: CancelCB | None = None) -> str:
         """
         Creates coroutines with arguments from the supplied iterable and runs them as new tasks in the pool.
 
@@ -894,7 +884,7 @@ class TaskPool(BaseTaskPool):
         return group_name
 
     def doublestarmap(self, func: CoroutineFunc, kwargs_iter: Iterable[KwArgsT], num_concurrent: int = 1,
-                      group_name: str = None, end_callback: EndCB = None, cancel_callback: CancelCB = None) -> str:
+                      group_name: str | None = None, end_callback: EndCB | None = None, cancel_callback: CancelCB | None = None) -> str:
         """
         Creates coroutines with arguments from the supplied iterable and runs them as new tasks in the pool.
 
@@ -930,9 +920,9 @@ class SimpleTaskPool(BaseTaskPool):
     Adding tasks blocks **only if** the pool is full at that moment.
     """
 
-    def __init__(self, func: CoroutineFunc, args: ArgsT = (), kwargs: KwArgsT = None,
-                 end_callback: EndCB = None, cancel_callback: CancelCB = None,
-                 pool_size: int = inf, name: str = None) -> None:
+    def __init__(self, func: Callable[_P, Awaitable[_R]], args: _P.args = (), kwargs: _P.kwargs = None,
+                 end_callback: EndCB | None = None, cancel_callback: CancelCB | None = None,
+                 pool_size: float = inf, name: str | None = None) -> None:
         """
         Initializes all required attributes.
 
@@ -958,12 +948,12 @@ class SimpleTaskPool(BaseTaskPool):
             `NotCoroutine`: `func` is not a coroutine function.
         """
         if not iscoroutinefunction(func):
-            raise exceptions.NotCoroutine(f"Not a coroutine function: {func}")
+            raise NotCoroutine(f"Not a coroutine function: {func}")
         self._func: CoroutineFunc = func
         self._args: ArgsT = args
         self._kwargs: KwArgsT = kwargs if kwargs is not None else {}
-        self._end_callback: EndCB = end_callback
-        self._cancel_callback: CancelCB = cancel_callback
+        self._end_callback: EndCB | None = end_callback
+        self._cancel_callback: CancelCB | None = cancel_callback
         self._start_calls: int = 0
         super().__init__(pool_size=pool_size, name=name)
 

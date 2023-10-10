@@ -100,9 +100,13 @@ fail_under = 100
 show_missing = true
 skip_covered = false
 exclude_lines = [
+    "if .*?sys.version.*:",
     "if TYPE_CHECKING:",
     '''if __name__ == ['"]__main__['"]:''',
     "@overload",
+]
+exclude_also = [
+    'class \w+\(Protocol\):',
 ]
 omit = [
     "tests/*",

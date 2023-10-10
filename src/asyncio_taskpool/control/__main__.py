@@ -1,24 +1,7 @@
-__author__ = "Daniil Fajnberg"
-__copyright__ = "Copyright © 2022 Daniil Fajnberg"
-__license__ = """GNU LGPLv3.0
-
-This file is part of asyncio-taskpool.
-
-asyncio-taskpool is free software: you can redistribute it and/or modify it under the terms of
-version 3.0 of the GNU Lesser General Public License as published by the Free Software Foundation.
-
-asyncio-taskpool is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
-without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
-See the GNU Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public License along with asyncio-taskpool. 
-If not, see <https://www.gnu.org/licenses/>."""
-
-__doc__ = """
+"""
 CLI entry point script for a :class:`ControlClient`.
 """
-
-
+from __future__ import annotations
 from argparse import ArgumentParser
 from asyncio import run
 from pathlib import Path
@@ -30,16 +13,13 @@ from .client import TCPControlClient, UnixControlClient
 from .server import TCPControlServer, UnixControlServer
 
 
-__all__ = []
-
-
 CLIENT_CLASS = 'client_class'
 UNIX, TCP = 'unix', 'tcp'
 SOCKET_PATH = 'socket_path'
 HOST, PORT = 'host', 'port'
 
 
-def parse_cli(args: Sequence[str] = None) -> Dict[str, Any]:
+def parse_cli(args: Sequence[str] | None = None) -> Dict[str, Any]:
     parser = ArgumentParser(
         prog=f'{PACKAGE_NAME}.control',
         description=f"Simple CLI based control client for {PACKAGE_NAME}"
@@ -70,7 +50,7 @@ def parse_cli(args: Sequence[str] = None) -> Dict[str, Any]:
     return vars(parser.parse_args(args))
 
 
-async def main():
+async def main() -> None:
     kwargs = parse_cli()
     client_cls = kwargs.pop(CLIENT_CLASS)
     await client_cls(**kwargs).start()

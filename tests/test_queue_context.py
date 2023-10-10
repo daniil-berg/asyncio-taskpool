@@ -1,24 +1,8 @@
-__author__ = "Daniil Fajnberg"
-__copyright__ = "Copyright © 2022 Daniil Fajnberg"
-__license__ = """GNU LGPLv3.0
-
-This file is part of asyncio-taskpool.
-
-asyncio-taskpool is free software: you can redistribute it and/or modify it under the terms of
-version 3.0 of the GNU Lesser General Public License as published by the Free Software Foundation.
-
-asyncio-taskpool is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
-without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
-See the GNU Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public License along with asyncio-taskpool. 
-If not, see <https://www.gnu.org/licenses/>."""
-
-__doc__ = """
+"""
 Unittests for the `asyncio_taskpool.queue_context` module.
 """
 
-
+from typing import Any
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import MagicMock, patch
 
@@ -26,15 +10,14 @@ from asyncio_taskpool.queue_context import Queue
 
 
 class QueueTestCase(IsolatedAsyncioTestCase):
-    def test_item_processed(self):
-        queue = Queue()
-        queue._unfinished_tasks = 1000
+    def test_item_processed(self) -> None:
+        queue: Queue[Any] = Queue()
+        queue._unfinished_tasks = 1000  # type: ignore[attr-defined]
         queue.item_processed()
-        self.assertEqual(999, queue._unfinished_tasks)
-
+        self.assertEqual(999, queue._unfinished_tasks)  # type: ignore[attr-defined]
     @patch.object(Queue, 'item_processed')
-    async def test_contextmanager(self, mock_item_processed: MagicMock):
-        queue = Queue()
+    async def test_contextmanager(self, mock_item_processed: MagicMock) -> None:
+        queue: Queue[Any] = Queue()
         item = 'foo'
         queue.put_nowait(item)
         async with queue as item_from_queue:

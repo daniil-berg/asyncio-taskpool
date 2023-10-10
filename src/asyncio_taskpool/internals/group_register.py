@@ -1,32 +1,19 @@
-__author__ = "Daniil Fajnberg"
-__copyright__ = "Copyright © 2022 Daniil Fajnberg"
-__license__ = """GNU LGPLv3.0
-
-This file is part of asyncio-taskpool.
-
-asyncio-taskpool is free software: you can redistribute it and/or modify it under the terms of
-version 3.0 of the GNU Lesser General Public License as published by the Free Software Foundation.
-
-asyncio-taskpool is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
-without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
-See the GNU Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public License along with asyncio-taskpool. 
-If not, see <https://www.gnu.org/licenses/>."""
-
-__doc__ = """
+"""
 Definition of :class:`TaskGroupRegister`.
 
 It should not be considered part of the public API.
 """
 
-
+from __future__ import annotations
 from asyncio.locks import Lock
-from collections.abc import MutableSet
-from typing import Iterator, Set
+from types import TracebackType
+from typing import Iterator, MutableSet, Set, Type, TypeVar
 
 
-class TaskGroupRegister(MutableSet):
+_E = TypeVar("_E", bound=BaseException)
+
+
+class TaskGroupRegister(MutableSet[int]):
     """
     Combines the interface of a regular `set` with that of the `asyncio.Lock`.
 
@@ -39,7 +26,7 @@ class TaskGroupRegister(MutableSet):
         self._ids: Set[int] = set(task_ids)
         self._lock = Lock()
 
-    def __contains__(self, task_id: int) -> bool:
+    def __contains__(self, task_id: object) -> bool:
         """Abstract method for the `MutableSet` base class."""
         return task_id in self._ids
 
@@ -72,6 +59,6 @@ class TaskGroupRegister(MutableSet):
         await self._lock.acquire()
         return None
 
-    async def __aexit__(self, exc_type, exc, tb) -> None:
+    async def __aexit__(self, exc_type: Type[_E] | None, exc_val: _E | None, exc_tb: TracebackType | None) -> None:
         """Provides the asynchronous context manager syntax `async with ... :` when using the lock."""
         self._lock.release()

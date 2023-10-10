@@ -1,35 +1,31 @@
-__author__ = "Daniil Fajnberg"
-__copyright__ = "Copyright © 2022 Daniil Fajnberg"
-__license__ = """GNU LGPLv3.0
-
-This file is part of asyncio-taskpool.
-
-asyncio-taskpool is free software: you can redistribute it and/or modify it under the terms of
-version 3.0 of the GNU Lesser General Public License as published by the Free Software Foundation.
-
-asyncio-taskpool is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
-without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
-See the GNU Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public License along with asyncio-taskpool. 
-If not, see <https://www.gnu.org/licenses/>."""
-
-__doc__ = """
+"""
 Miscellaneous helper functions. None of these should be considered part of the public API.
 """
 
-
+from __future__ import annotations
 import builtins
 from asyncio.coroutines import iscoroutinefunction
 from importlib import import_module
 from inspect import getdoc
-from typing import Any, Callable, Optional, Type, Union
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Iterable, Literal, Mapping, Type, TypeVar, cast, overload
+from typing_extensions import ParamSpec
 
 from .constants import PYTHON_BEFORE_39
-from .types import T, AnyCallableT, ArgsT, KwArgsT
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+_T = TypeVar("_T")
 
 
-async def execute_optional(function: AnyCallableT, args: ArgsT = (), kwargs: KwArgsT = None) -> Optional[T]:
+@overload
+async def execute_optional(function: Callable[_P, _R | Awaitable[_R]], args: _P.args = (), kwargs: _P.kwargs = None) -> _R: ...
+
+
+@overload
+async def execute_optional(function: object, args: object = (), kwargs: object = None) -> None: ...
+
+
+async def execute_optional(function: Callable[_P, _R | Awaitable[_R]] | object, args: _P.args = (), kwargs: _P.kwargs = None) -> _R | None:
     """
     Runs `function` with `args` and `kwargs` and returns its output.
 
@@ -47,15 +43,27 @@ async def execute_optional(function: AnyCallableT, args: ArgsT = (), kwargs: KwA
         Whatever `function` returns (possibly after being awaited) or `None` if `function` is not callable.
     """
     if not callable(function):
-        return
+        return None
     if kwargs is None:
         kwargs = {}
     if iscoroutinefunction(function):
-        return await function(*args, **kwargs)
-    return function(*args, **kwargs)
+        return await cast(Awaitable[_R], function(*args, **kwargs))
+    return cast(_R, function(*args, **kwargs))
 
 
-def star_function(function: AnyCallableT, arg: Any, arg_stars: int = 0) -> T:
+@overload
+def star_function(function: Callable[..., _R], arg: Mapping[str, object], arg_stars: Literal[2]) -> _R: ...
+
+
+@overload
+def star_function(function: Callable[..., _R], arg: Iterable[object], arg_stars: Literal[1]) -> _R: ...
+
+
+@overload
+def star_function(function: Callable[..., _R], arg: object, arg_stars: Literal[0] = 0) -> _R: ...
+
+
+def star_function(function: Callable[..., _R], arg: Any, arg_stars: int = 0) -> _R:
     """
     Calls `function` passing `arg` to it, optionally unpacking it first.
 
@@ -87,12 +95,15 @@ def star_function(function: AnyCallableT, arg: Any, arg_stars: int = 0) -> T:
     raise ValueError(f"Invalid argument arg_stars={arg_stars}; must be 0, 1, or 2.")
 
 
-def get_first_doc_line(obj: object) -> str:
+def get_first_doc_line(obj: object) -> str | None:
     """Takes an object and returns the first (non-empty) line of its docstring."""
-    return getdoc(obj).strip().split("\n", 1)[0].strip()
+    doc = getdoc(obj)
+    if doc is None:
+        return None
+    return doc.strip().split("\n", 1)[0].strip()
 
 
-async def return_or_exception(_function_to_execute: AnyCallableT, *args, **kwargs) -> Union[T, Exception]:
+async def return_or_exception(_function_to_execute: Callable[_P, _R | Awaitable[_R]], *args: _P.args, **kwargs: _P.kwargs) -> _R | Exception:
     """
     Returns the output of a function or the exception thrown during its execution.
 
@@ -109,9 +120,9 @@ async def return_or_exception(_function_to_execute: AnyCallableT, *args, **kwarg
     """
     try:
         if iscoroutinefunction(_function_to_execute):
-            return await _function_to_execute(*args, **kwargs)
+            return await cast(Awaitable[_R], _function_to_execute(*args, **kwargs))
         else:
-            return _function_to_execute(*args, **kwargs)
+            return cast(_R, _function_to_execute(*args, **kwargs))
     except Exception as e:
         return e
 
@@ -138,20 +149,21 @@ def resolve_dotted_path(dotted_path: str) -> object:
 class ClassMethodWorkaround:
     """Dirty workaround to make the `@classmethod` decorator work with properties."""
 
-    def __init__(self, method_or_property: Union[Callable, property]) -> None:
+    def __init__(self, method_or_property: Callable[..., Any] | property) -> None:
         if isinstance(method_or_property, property):
+            assert method_or_property.fget is not None, "Missing property getter"
             self._getter = method_or_property.fget
         else:
             self._getter = method_or_property
 
-    def __get__(self, obj: Union[T, None], cls: Union[Type[T], None]) -> Any:
+    def __get__(self, obj: _T | None, cls: Type[_T] | None) -> Any:
         if obj is None:
             return self._getter(cls)
         return self._getter(obj)
 
 
-# Starting with Python 3.9, this is thankfully no longer necessary.
-if PYTHON_BEFORE_39:
+if not TYPE_CHECKING and PYTHON_BEFORE_39:
+    # Starting with Python 3.9, this is thankfully no longer necessary.
     classmethod = ClassMethodWorkaround
 else:
     classmethod = builtins.classmethod

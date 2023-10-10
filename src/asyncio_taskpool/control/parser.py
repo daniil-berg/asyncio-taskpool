@@ -1,34 +1,18 @@
-__author__ = "Daniil Fajnberg"
-__copyright__ = "Copyright © 2022 Daniil Fajnberg"
-__license__ = """GNU LGPLv3.0
-
-This file is part of asyncio-taskpool.
-
-asyncio-taskpool is free software: you can redistribute it and/or modify it under the terms of
-version 3.0 of the GNU Lesser General Public License as published by the Free Software Foundation.
-
-asyncio-taskpool is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
-without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
-See the GNU Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public License along with asyncio-taskpool. 
-If not, see <https://www.gnu.org/licenses/>."""
-
-__doc__ = """
+"""
 Definition of the :class:`ControlParser` used in a 
 :class:`ControlSession <asyncio_taskpool.control.session.ControlSession>`.
 
 It should not be considered part of the public API.
 """
 
-
+from __future__ import annotations
 import logging
 from argparse import Action, ArgumentParser, ArgumentDefaultsHelpFormatter, HelpFormatter, ArgumentTypeError, SUPPRESS
 from ast import literal_eval
 from inspect import Parameter, getmembers, isfunction, signature
 from io import StringIO
 from shutil import get_terminal_size
-from typing import Any, Callable, Container, Dict, Iterable, Set, Type, TypeVar
+from typing import Any, Callable, Container, Dict, IO, Iterable, NoReturn, Protocol, Set, Type, TypeVar, cast, overload
 
 from ..exceptions import HelpRequested, ParserError
 from ..internals.constants import CLIENT_INFO, CMD
@@ -42,12 +26,17 @@ __all__ = ['ControlParser']
 log = logging.getLogger(__name__)
 
 
-FmtCls = TypeVar('FmtCls', bound=Type[HelpFormatter])
+FmtCls = TypeVar('FmtCls', bound=HelpFormatter)
 ParsersDict = Dict[str, 'ControlParser']
 
 OMIT_PARAMS_DEFAULT = ('self', )
 
 NAME, PROG, HELP, DESCRIPTION = 'name', 'prog', 'help', 'description'
+
+
+class _CanAddControlParser(Protocol):
+    def add_parser(self, **kwargs: Any) -> ControlParser:
+        ...
 
 
 class ControlParser(ArgumentParser):
@@ -61,8 +50,16 @@ class ControlParser(ArgumentParser):
     Finally, it offers some convenience methods and makes use of custom exceptions.
     """
 
+    @overload
     @staticmethod
-    def help_formatter_factory(terminal_width: int, base_cls: FmtCls = None) -> FmtCls:
+    def help_formatter_factory(terminal_width: int, base_cls: Type[FmtCls]) -> Type[FmtCls]: ...
+
+    @overload
+    @staticmethod
+    def help_formatter_factory(terminal_width: int, base_cls: None = None) -> Type[ArgumentDefaultsHelpFormatter]: ...
+
+    @staticmethod
+    def help_formatter_factory(terminal_width: int, base_cls: Type[HelpFormatter] | None = None) -> Type[HelpFormatter]:
         """
         Constructs and returns a subclass of :class:`argparse.HelpFormatter`
 
@@ -83,13 +80,13 @@ class ControlParser(ArgumentParser):
         if base_cls is None:
             base_cls = ArgumentDefaultsHelpFormatter
 
-        class ClientHelpFormatter(base_cls):
-            def __init__(self, *args, **kwargs) -> None:
+        class ClientHelpFormatter(base_cls):  # type: ignore[valid-type, misc]
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
                 kwargs['width'] = terminal_width
                 super().__init__(*args, **kwargs)
         return ClientHelpFormatter
 
-    def __init__(self, stream: StringIO, terminal_width: int = None, **kwargs) -> None:
+    def __init__(self, stream: StringIO, terminal_width: int | None = None, **kwargs: Any) -> None:
         """
         Sets some internal attributes in addition to the base class.
 
@@ -108,10 +105,10 @@ class ControlParser(ArgumentParser):
         kwargs['formatter_class'] = self.help_formatter_factory(self._terminal_width, kwargs.get('formatter_class'))
         super().__init__(**kwargs)
         self._flags: Set[str] = set()
-        self._commands = None
+        self._commands: _CanAddControlParser | None = None
 
-    def add_function_command(self, function: Callable, omit_params: Container[str] = OMIT_PARAMS_DEFAULT,
-                             **subparser_kwargs) -> 'ControlParser':
+    def add_function_command(self, function: Callable[..., Any], omit_params: Container[str] = OMIT_PARAMS_DEFAULT,
+                             **subparser_kwargs: Any) -> ControlParser:
         """
         Takes a function and adds a corresponding (sub-)command to the parser.
 
@@ -131,6 +128,7 @@ class ControlParser(ArgumentParser):
         Returns:
             The subparser instance created from the function.
         """
+        assert self._commands is not None, "Call `add_subparsers` first"
         subparser_kwargs.setdefault(NAME, function.__name__.replace('_', '-'))
         subparser_kwargs.setdefault(PROG, subparser_kwargs[NAME])
         subparser_kwargs.setdefault(HELP, get_first_doc_line(function))
@@ -139,7 +137,7 @@ class ControlParser(ArgumentParser):
         subparser.add_function_args(function, omit_params)
         return subparser
 
-    def add_property_command(self, prop: property, cls_name: str = '', **subparser_kwargs) -> 'ControlParser':
+    def add_property_command(self, prop: property, cls_name: str = '', **subparser_kwargs: Any) -> ControlParser:
         """
         Same as the :meth:`add_function_command` method, but for properties.
 
@@ -154,6 +152,8 @@ class ControlParser(ArgumentParser):
         Returns:
             The subparser instance created from the property.
         """
+        assert prop.fget is not None, "Property must have a getter"
+        assert self._commands is not None, "Call `add_subparsers` first"
         subparser_kwargs.setdefault(NAME, prop.fget.__name__.replace('_', '-'))
         subparser_kwargs.setdefault(PROG, subparser_kwargs[NAME])
         getter_help = get_first_doc_line(prop.fget)
@@ -169,7 +169,7 @@ class ControlParser(ArgumentParser):
             subparser.add_function_arg(param, nargs='?', default=SUPPRESS, help=setter_arg_help)
         return subparser
 
-    def add_class_commands(self, cls: Type, public_only: bool = True, omit_members: Container[str] = (),
+    def add_class_commands(self, cls: Type[Any], public_only: bool = True, omit_members: Container[str] = (),
                            member_arg_name: str = CMD) -> ParsersDict:
         """
         Adds methods/properties of a class as (sub-)commands to the parser.
@@ -194,12 +194,13 @@ class ControlParser(ArgumentParser):
             Dictionary mapping class member names to the (sub-)parsers created from them.
         """
         parsers: ParsersDict = {}
+        # TODO: Annotate the following as a TypedDict
         common_kwargs = {'stream': self._stream, CLIENT_INFO.TERMINAL_WIDTH: self._terminal_width}
         for name, member in getmembers(cls):
             if name in omit_members or (name.startswith('_') and public_only):
                 continue
             if isfunction(member):
-                subparser = self.add_function_command(member, **common_kwargs)
+                subparser = self.add_function_command(member, **common_kwargs)  # type: ignore[arg-type]
             elif isinstance(member, property):
                 subparser = self.add_property_command(member, cls.__name__, **common_kwargs)
             else:
@@ -208,32 +209,32 @@ class ControlParser(ArgumentParser):
             parsers[name] = subparser
         return parsers
 
-    def add_subparsers(self, *args, **kwargs):
+    def add_subparsers(self, *args: Any, **kwargs: Any) -> Any:
         """Adds the subparsers action as an attribute before returning it."""
-        self._commands = super().add_subparsers(*args, **kwargs)
+        self._commands = cast(_CanAddControlParser, super().add_subparsers(*args, **kwargs))
         return self._commands
 
-    def _print_message(self, message: str, *args, **kwargs) -> None:
+    def _print_message(self, message: str, *args: Any, **kwargs: Any) -> None:
         """This is overridden to ensure that no messages are sent to stdout/stderr, but always to the stream buffer."""
         if message:
             self._stream.write(message)
 
-    def exit(self, status: int = 0, message: str = None) -> None:
+    def exit(self, status: int = 0, message: str | None = None) -> None:  # type: ignore[override]
         """This is overridden to prevent system exit to be invoked."""
         if message:
             self._print_message(message)
 
-    def error(self, message: str) -> None:
+    def error(self, message: str) -> NoReturn:
         """Raises the :exc:`ParserError <asyncio_taskpool.exceptions.ParserError>` exception at the end."""
         super().error(message=message)
         raise ParserError
 
-    def print_help(self, file=None) -> None:
+    def print_help(self, file: IO[str] | None =None) -> None:
         """Raises the :exc:`HelpRequested <asyncio_taskpool.exceptions.HelpRequested>` exception at the end."""
         super().print_help(file)
         raise HelpRequested
 
-    def add_function_arg(self, parameter: Parameter, **kwargs) -> Action:
+    def add_function_arg(self, parameter: Parameter, **kwargs: Any) -> Action:
         """
         Takes an :class:`inspect.Parameter` and adds a corresponding parser argument.
 
@@ -278,7 +279,7 @@ class ControlParser(ArgumentParser):
             kwargs.setdefault('type', _get_type_from_annotation(parameter.annotation))
         return self.add_argument(*name_or_flags, **kwargs)
 
-    def add_function_args(self, function: Callable, omit: Container[str] = OMIT_PARAMS_DEFAULT) -> None:
+    def add_function_args(self, function: Callable[..., Any], omit: Container[str] = OMIT_PARAMS_DEFAULT) -> None:
         """
         Takes a function and adds its parameters as arguments to the parser.
 
@@ -299,7 +300,7 @@ class ControlParser(ArgumentParser):
                 self.add_function_arg(param, help=repr(param.annotation))
 
 
-def _get_arg_type_wrapper(cls: Type) -> Callable[[Any], Any]:
+def _get_arg_type_wrapper(cls: Type[Any]) -> Callable[[Any], Any]:
     """
     Returns a wrapper for the constructor of `cls` to avoid a ValueError being raised on suppressed arguments.
 
@@ -324,7 +325,7 @@ def _get_arg_type_wrapper(cls: Type) -> Callable[[Any], Any]:
     return wrapper
 
 
-def _get_type_from_annotation(annotation: Type) -> Callable[[Any], Any]:
+def _get_type_from_annotation(annotation: Any) -> Callable[[Any], Any]:
     """
     Returns a type conversion function based on the `annotation` passed.
 

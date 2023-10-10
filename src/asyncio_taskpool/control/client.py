@@ -1,31 +1,15 @@
-__author__ = "Daniil Fajnberg"
-__copyright__ = "Copyright © 2022 Daniil Fajnberg"
-__license__ = """GNU LGPLv3.0
-
-This file is part of asyncio-taskpool.
-
-asyncio-taskpool is free software: you can redistribute it and/or modify it under the terms of
-version 3.0 of the GNU Lesser General Public License as published by the Free Software Foundation.
-
-asyncio-taskpool is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
-without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
-See the GNU Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public License along with asyncio-taskpool. 
-If not, see <https://www.gnu.org/licenses/>."""
-
-__doc__ = """
+"""
 Classes of control clients for a simply interface to a task pool control server.
 """
 
-
+from __future__ import annotations
 import json
 import shutil
 import sys
 from abc import ABC, abstractmethod
 from asyncio.streams import StreamReader, StreamWriter, open_connection
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any
 
 from ..internals.constants import CLIENT_INFO, SESSION_MSG_BYTES
 from ..internals.types import ClientConnT, PathT
@@ -52,12 +36,12 @@ class ControlClient(ABC):
     """
 
     @staticmethod
-    def _client_info() -> dict:
+    def _client_info() -> dict[str, Any]:
         """Returns a dictionary of client information relevant for the handshake with the server."""
         return {CLIENT_INFO.TERMINAL_WIDTH: shutil.get_terminal_size().columns}
 
     @abstractmethod
-    async def _open_connection(self, **kwargs) -> ClientConnT:
+    async def _open_connection(self, **kwargs: Any) -> ClientConnT:
         """
         Tries to connect to a socket using the provided arguments and return the associated reader-writer-pair.
 
@@ -68,7 +52,7 @@ class ControlClient(ABC):
         """
         raise NotImplementedError
 
-    def __init__(self, **conn_kwargs) -> None:
+    def __init__(self, **conn_kwargs: Any) -> None:
         """Simply stores the keyword-arguments for opening the connection."""
         self._conn_kwargs = conn_kwargs
         self._connected: bool = False
@@ -90,7 +74,7 @@ class ControlClient(ABC):
         print("Connected to", (await reader.read(SESSION_MSG_BYTES)).decode())
         print("Type '-h' to get help and usage instructions for all available commands.\n")
 
-    def _get_command(self, writer: StreamWriter) -> Optional[str]:
+    def _get_command(self, writer: StreamWriter) -> str | None:
         """
         Prompts the user for input and either returns it (after cleaning it up) or `None` in special cases.
 
@@ -108,11 +92,11 @@ class ControlClient(ABC):
             cmd = CLIENT_EXIT
         except KeyboardInterrupt:  # Ctrl+C shall simply reset to the input prompt.
             print()
-            return
+            return None
         if cmd == CLIENT_EXIT:
             writer.close()
             self._connected = False
-            return
+            return None
         return cmd or None  # will be None if `cmd` is an empty string
 
     async def _interact(self, reader: StreamReader, writer: StreamWriter) -> None:
@@ -153,7 +137,7 @@ class ControlClient(ABC):
         the method returns and prints out a disconnected-message.
         """
         reader, writer = await self._open_connection(**self._conn_kwargs)
-        if reader is None:
+        if reader is None or writer is None:
             print("Failed to connect.", file=sys.stderr)
             return
         await self._server_handshake(reader, writer)
@@ -165,13 +149,13 @@ class ControlClient(ABC):
 class TCPControlClient(ControlClient):
     """Task pool control client for connecting to a :class:`TCPControlServer`."""
 
-    def __init__(self, host: str, port: Union[int, str], **conn_kwargs) -> None:
+    def __init__(self, host: str, port: int | str, **conn_kwargs: Any) -> None:
         """`host` and `port` are expected as non-optional connection arguments."""
         self._host = host
         self._port = port
         super().__init__(**conn_kwargs)
 
-    async def _open_connection(self, **kwargs) -> ClientConnT:
+    async def _open_connection(self, **kwargs: Any) -> ClientConnT:
         """
         Wrapper around the `asyncio.open_connection` function.
 
@@ -188,14 +172,14 @@ class TCPControlClient(ControlClient):
 class UnixControlClient(ControlClient):
     """Task pool control client for connecting to a :class:`UnixControlServer`."""
 
-    def __init__(self, socket_path: PathT, **conn_kwargs) -> None:
+    def __init__(self, socket_path: PathT, **conn_kwargs: Any) -> None:
         """`socket_path` is expected as a non-optional connection argument."""
         from asyncio.streams import open_unix_connection
         self._open_unix_connection = open_unix_connection
         self._socket_path = Path(socket_path)
         super().__init__(**conn_kwargs)
 
-    async def _open_connection(self, **kwargs) -> ClientConnT:
+    async def _open_connection(self, **kwargs: Any) -> ClientConnT:
         """
         Wrapper around the `asyncio.open_unix_connection` function.
 
