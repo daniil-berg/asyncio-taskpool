@@ -21,7 +21,7 @@ Welcome to the asyncio-taskpool documentation!
 Purpose
 -------
 
-A `task <https://docs.python.org/3/library/asyncio-task.html>`_ is a very powerful tool of concurrency in the Python world. Since concurrency always implies doing more than one thing a time, you rarely deal with just one :code:`Task` instance. However, managing multiple tasks can become a bit cumbersome quickly, as their number increases. Moreover, especially in long-running code, you may find it useful (or even necessary) to dynamically adjust the extent to which the work is distributed, i.e. increase or decrease the number of tasks.
+A `task <https://docs.python.org/3/library/asyncio-task.html>`_ is a very powerful tool of concurrency in the Python world. Since concurrency always implies doing more than one thing at a time, you rarely deal with just one :code:`Task` instance. However, managing multiple tasks can become a bit cumbersome quickly, as their number increases. Moreover, especially in long-running code, you may find it useful (or even necessary) to dynamically adjust the extent to which the work is distributed, i.e. increase or decrease the number of tasks.
 
 With that in mind, this library aims to provide two things:
 
