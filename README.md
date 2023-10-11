@@ -88,7 +88,7 @@ The full license texts for the [GNU GPLv3.0](COPYING) and the [GNU LGPLv3.0](COP
 
 ---
 
-© 2022 Daniil Fajnberg
+© 2023 Daniil Fajnberg
 
 [github-last-commit]: https://github.com/daniil-berg/asyncio-taskpool/commits
 [github-last-commit-img]: https://img.shields.io/github/last-commit/daniil-berg/asyncio-taskpool?label=Last%20commit&logo=git&

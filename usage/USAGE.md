@@ -263,4 +263,4 @@ It may be useful to run the server script and the client interface in two separa
 
 ---
 
-© 2022 Daniil Fajnberg
+© 2023 Daniil Fajnberg
