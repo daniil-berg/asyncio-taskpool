@@ -19,9 +19,9 @@ from asyncio_taskpool.exceptions import HelpRequested, ParserError
 from asyncio_taskpool.internals.constants import CLIENT_INFO
 from asyncio_taskpool.internals.helpers import resolve_dotted_path
 from asyncio_taskpool.internals.types import (
+    AnyCoroutineFunc,
     ArgsT,
     CancelCB,
-    CoroutineFunc,
     EndCB,
     KwArgsT,
 )
@@ -402,7 +402,7 @@ class RestTestCase(TestCase):
         self, mock__get_arg_type_wrapper: MagicMock
     ) -> None:
         mock__get_arg_type_wrapper.return_value = expected_output = FOO + BAR
-        dotted_path_ann = [CoroutineFunc, EndCB, CancelCB]
+        dotted_path_ann = [AnyCoroutineFunc, EndCB, CancelCB]
         literal_eval_ann = [ArgsT, KwArgsT, Iterable[ArgsT], Iterable[KwArgsT]]
         any_other_ann = MagicMock()
         for a1 in dotted_path_ann:

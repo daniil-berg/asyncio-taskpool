@@ -38,7 +38,7 @@ from typing import (
 from ..exceptions import HelpRequested, ParserError
 from ..internals.constants import CLIENT_INFO, CMD
 from ..internals.helpers import get_first_doc_line, resolve_dotted_path
-from ..internals.types import ArgsT, CancelCB, CoroutineFunc, EndCB, KwArgsT
+from ..internals.types import AnyCoroutineFunc, ArgsT, CancelCB, EndCB, KwArgsT
 
 __all__ = ["ControlParser"]
 
@@ -443,7 +443,7 @@ def _get_type_from_annotation(annotation: Any) -> Callable[[Any], Any]:
     `Iterable`- or args/kwargs-type annotations use `ast.literal_eval`.
     Others pass unchanged (but still wrapped with `_get_arg_type_wrapper`).
     """
-    if any(annotation is t for t in (CoroutineFunc, EndCB, CancelCB)):
+    if any(annotation is t for t in (AnyCoroutineFunc, EndCB, CancelCB)):
         annotation = resolve_dotted_path
     if any(
         annotation is t

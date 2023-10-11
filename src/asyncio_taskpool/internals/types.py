@@ -25,7 +25,8 @@ ArgsT = Iterable[Any]
 KwArgsT = Mapping[str, Any]
 
 AnyCallableT = Callable[..., Union[T, Awaitable[T]]]
-CoroutineFunc = Callable[..., Coroutine]
+AnyCoroutine = Coroutine[Any, Any, Any]
+AnyCoroutineFunc = Callable[..., AnyCoroutine]
 
 EndCB = Callable[[int], Any]
 CancelCB = Callable[[int], Any]

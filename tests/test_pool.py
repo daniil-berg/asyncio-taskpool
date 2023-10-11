@@ -831,7 +831,8 @@ class TaskPoolTestCase(CommonTestCase):
             acquire=mock_acquire
         )
         mock_star_function.return_value = mock_coroutine = MagicMock()
-        arg_it = iter(arg for arg in (arg1, arg2, FOO))
+        args1, args2, args3 = (1, 2), (3, 4), (FOO, BAR)
+        arg_it = (arg for arg in (args1, args2, args3))
         await self.task_pool._arg_consumer(
             grp_name, n, mock_func, arg_it, 1, end_cb, cancel_cb
         )
@@ -841,8 +842,8 @@ class TaskPoolTestCase(CommonTestCase):
         )
         mock_star_function.assert_has_calls(
             [
-                call(mock_func, arg1, arg_stars=1),
-                call(mock_func, arg2, arg_stars=1),
+                call(mock_func, args1, arg_stars=1),
+                call(mock_func, args2, arg_stars=1),
             ]
         )
         mock_acquire.assert_has_awaits([call(), call()])
@@ -855,7 +856,7 @@ class TaskPoolTestCase(CommonTestCase):
         )
         mock_coroutine.close.assert_called_once_with()
         mock_semaphore.release.assert_not_called()
-        self.assertEqual(FOO, next(arg_it))
+        self.assertEqual(args3, next(arg_it))
 
         mock_acquire.reset_mock(side_effect=True)
         mock_semaphore_cls.reset_mock()
@@ -865,7 +866,7 @@ class TaskPoolTestCase(CommonTestCase):
 
         # With a CancelledError thrown while starting the task:
         mock__start_task.side_effect = [None, CancelledError]
-        arg_it = iter(arg for arg in (arg1, arg2, FOO))
+        arg_it = (arg for arg in (args1, args2, args3))
         await self.task_pool._arg_consumer(
             grp_name, n, mock_func, arg_it, 1, end_cb, cancel_cb
         )
@@ -875,8 +876,8 @@ class TaskPoolTestCase(CommonTestCase):
         )
         mock_star_function.assert_has_calls(
             [
-                call(mock_func, arg1, arg_stars=1),
-                call(mock_func, arg2, arg_stars=1),
+                call(mock_func, args1, arg_stars=1),
+                call(mock_func, args2, arg_stars=1),
             ]
         )
         mock_acquire.assert_has_awaits([call(), call()])
@@ -894,7 +895,7 @@ class TaskPoolTestCase(CommonTestCase):
         )
         mock_coroutine.close.assert_called_once_with()
         mock_semaphore.release.assert_called_once_with()
-        self.assertEqual(FOO, next(arg_it))
+        self.assertEqual(args3, next(arg_it))
 
     @patch.object(pool, "create_task")
     @patch.object(pool.TaskPool, "_arg_consumer", new_callable=MagicMock)
@@ -917,7 +918,7 @@ class TaskPoolTestCase(CommonTestCase):
 
         with self.assertRaises(ValueError):
             self.task_pool._map(
-                group_name, n, func, arg_iter, 1, end_cb, cancel_cb
+                group_name, n, func, arg_iter, 0, end_cb, cancel_cb
             )
         mock__check_start.assert_called_once_with(function=func)
 
@@ -928,7 +929,7 @@ class TaskPoolTestCase(CommonTestCase):
 
         with self.assertRaises(exceptions.InvalidGroupName):
             self.task_pool._map(
-                group_name, n, func, arg_iter, 1, end_cb, cancel_cb
+                group_name, n, func, arg_iter, 0, end_cb, cancel_cb
             )
         mock__check_start.assert_called_once_with(function=func)
 
@@ -936,7 +937,7 @@ class TaskPoolTestCase(CommonTestCase):
 
         self.task_pool._task_groups.clear()
 
-        self.task_pool._map(group_name, n, func, arg_iter, 1, end_cb, cancel_cb)
+        self.task_pool._map(group_name, n, func, arg_iter, 0, end_cb, cancel_cb)
         mock__check_start.assert_called_once_with(function=func)
         mock_reg_cls.assert_called_once_with()
         self.task_pool._task_groups[group_name] = mock_group_reg
@@ -945,7 +946,7 @@ class TaskPoolTestCase(CommonTestCase):
             n,
             func,
             arg_iter,
-            1,
+            0,
             end_callback=end_cb,
             cancel_callback=cancel_cb,
         )
@@ -999,9 +1000,12 @@ class TaskPoolTestCase(CommonTestCase):
     def test_starmap(
         self, mock__generate_group_name: MagicMock, mock__map: MagicMock
     ) -> None:
+        async def mock_func(_x: int, _y: str) -> None:
+            pass
+
+        args_iter = [(1, "a"), (2, "b")]
         mock__generate_group_name.return_value = generated_name = "name 1 2 3"
-        mock_func = MagicMock()
-        args_iter, num_concurrent, group_name = ([FOO], [BAR]), 2, FOO + BAR
+        num_concurrent, group_name = 2, FOO + BAR
         end_cb, cancel_cb = MagicMock(), MagicMock()
         output = self.task_pool.starmap(
             mock_func, args_iter, num_concurrent, group_name, end_cb, cancel_cb

@@ -32,11 +32,14 @@ from typing import (
     Iterable,
     List,
     Literal,
+    Mapping,
     Set,
+    Tuple,
     TypeVar,
     Union,
+    overload,
 )
-from typing_extensions import ParamSpec
+from typing_extensions import ParamSpec, TypeVarTuple, Unpack
 
 from .exceptions import (
     AlreadyCancelled,
@@ -50,12 +53,21 @@ from .exceptions import (
 from .internals.constants import DEFAULT_TASK_GROUP, PYTHON_BEFORE_39
 from .internals.group_register import TaskGroupRegister
 from .internals.helpers import execute_optional, star_function
-from .internals.types import ArgsT, CancelCB, CoroutineFunc, EndCB, KwArgsT
+from .internals.types import (
+    AnyCoroutine,
+    AnyCoroutineFunc,
+    ArgsT,
+    CancelCB,
+    EndCB,
+    KwArgsT,
+)
 
 __all__ = ["BaseTaskPool", "TaskPool", "SimpleTaskPool", "AnyTaskPoolT"]
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
+_T = TypeVar("_T")
+_Ts = TypeVarTuple("_Ts")
 
 log = logging.getLogger(__name__)
 
@@ -714,7 +726,7 @@ class TaskPool(BaseTaskPool):
     def _generate_group_name(
         self,
         prefix: str,
-        coroutine_function: CoroutineFunc,
+        coroutine_function: AnyCoroutineFunc,
     ) -> str:
         """
         Creates a unique task group identifier.
@@ -907,13 +919,51 @@ class TaskPool(BaseTaskPool):
 
         return release_callback
 
-    # TODO: See if it is possible to type this more precisely with overloads
+    @overload
     async def _arg_consumer(
         self,
         group_name: str,
         num_concurrent: int,
-        func: CoroutineFunc,
-        arg_iter: ArgsT,
+        func: AnyCoroutineFunc,
+        arg_iter: Iterable[Mapping[str, object]],
+        arg_stars: Literal[2],
+        end_callback: EndCB | None = None,
+        cancel_callback: CancelCB | None = None,
+    ) -> None:
+        ...
+
+    @overload
+    async def _arg_consumer(
+        self,
+        group_name: str,
+        num_concurrent: int,
+        func: AnyCoroutineFunc,
+        arg_iter: Iterable[Iterable[object]],
+        arg_stars: Literal[1],
+        end_callback: EndCB | None = None,
+        cancel_callback: CancelCB | None = None,
+    ) -> None:
+        ...
+
+    @overload
+    async def _arg_consumer(
+        self,
+        group_name: str,
+        num_concurrent: int,
+        func: AnyCoroutineFunc,
+        arg_iter: Iterable[object],
+        arg_stars: Literal[0],
+        end_callback: EndCB | None = None,
+        cancel_callback: CancelCB | None = None,
+    ) -> None:
+        ...
+
+    async def _arg_consumer(
+        self,
+        group_name: str,
+        num_concurrent: int,
+        func: AnyCoroutineFunc,
+        arg_iter: Iterable[Any],
         arg_stars: Literal[0, 1, 2],
         end_callback: EndCB | None = None,
         cancel_callback: CancelCB | None = None,
@@ -999,12 +1049,50 @@ class TaskPool(BaseTaskPool):
                     semaphore.release()
                 return
 
-    # TODO: See if it is possible to type this more precisely with overloads
+    @overload
     def _map(
         self,
         group_name: str,
         num_concurrent: int,
-        func: CoroutineFunc,
+        func: AnyCoroutineFunc,
+        arg_iter: Iterable[Mapping[str, object]],
+        arg_stars: Literal[2],
+        end_callback: EndCB | None = None,
+        cancel_callback: CancelCB | None = None,
+    ) -> None:
+        ...
+
+    @overload
+    def _map(
+        self,
+        group_name: str,
+        num_concurrent: int,
+        func: AnyCoroutineFunc,
+        arg_iter: Iterable[Iterable[object]],
+        arg_stars: Literal[1],
+        end_callback: EndCB | None = None,
+        cancel_callback: CancelCB | None = None,
+    ) -> None:
+        ...
+
+    @overload
+    def _map(
+        self,
+        group_name: str,
+        num_concurrent: int,
+        func: AnyCoroutineFunc,
+        arg_iter: Iterable[object],
+        arg_stars: Literal[0],
+        end_callback: EndCB | None = None,
+        cancel_callback: CancelCB | None = None,
+    ) -> None:
+        ...
+
+    def _map(
+        self,
+        group_name: str,
+        num_concurrent: int,
+        func: AnyCoroutineFunc,
         arg_iter: ArgsT,
         arg_stars: Literal[0, 1, 2],
         end_callback: EndCB | None = None,
@@ -1091,8 +1179,8 @@ class TaskPool(BaseTaskPool):
 
     def map(  # noqa: A003 (Class attribute {} is shadowing a Python builtin)
         self,
-        func: CoroutineFunc,
-        arg_iter: ArgsT,
+        func: Callable[[_T], AnyCoroutine],
+        arg_iter: Iterable[_T],
         num_concurrent: int = 1,
         group_name: str | None = None,
         end_callback: EndCB | None = None,
@@ -1174,8 +1262,8 @@ class TaskPool(BaseTaskPool):
 
     def starmap(
         self,
-        func: CoroutineFunc,
-        args_iter: Iterable[ArgsT],
+        func: Callable[[Unpack[_Ts]], AnyCoroutine],
+        args_iter: Iterable[Tuple[Unpack[_Ts]]],
         num_concurrent: int = 1,
         group_name: str | None = None,
         end_callback: EndCB | None = None,
@@ -1209,7 +1297,7 @@ class TaskPool(BaseTaskPool):
 
     def doublestarmap(
         self,
-        func: CoroutineFunc,
+        func: Callable[..., AnyCoroutine],
         kwargs_iter: Iterable[KwArgsT],
         num_concurrent: int = 1,
         group_name: str | None = None,
@@ -1265,7 +1353,7 @@ class SimpleTaskPool(BaseTaskPool):
 
     def __init__(
         self,
-        func: Callable[_P, Awaitable[_R]],
+        func: Callable[_P, Coroutine[_R, Any, Any]],
         args: _P.args = (),
         kwargs: _P.kwargs = None,
         end_callback: EndCB | None = None,
@@ -1299,7 +1387,7 @@ class SimpleTaskPool(BaseTaskPool):
         """
         if not iscoroutinefunction(func):
             raise NotCoroutine(f"Not a coroutine function: {func}")
-        self._func: CoroutineFunc = func
+        self._func: AnyCoroutineFunc = func
         self._args: ArgsT = args
         self._kwargs: KwArgsT = kwargs if kwargs is not None else {}
         self._end_callback: EndCB | None = end_callback

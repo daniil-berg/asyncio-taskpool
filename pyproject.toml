@@ -78,7 +78,10 @@ files = [
 warn_unused_configs = true
 strict = true
 show_error_codes = true
-enable_incomplete_feature = []
+enable_incomplete_feature = [
+    "TypeVarTuple",
+    "Unpack",
+]
 plugins = []
 
 #######################
