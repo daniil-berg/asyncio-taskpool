@@ -108,7 +108,7 @@ class ControlParserTestCase(TestCase):
         }
         to_omit = ["abc", "xyz"]
         output = self.parser.add_function_command(
-            foo_bar, omit_params=to_omit, **kwargs
+            foo_bar, omit_params=to_omit, **kwargs  # type: ignore[arg-type]
         )
         self.assertEqual(mock_subparser, output)
         mock_add_parser.assert_called_once_with(**expected_kwargs)
@@ -143,7 +143,7 @@ class ControlParserTestCase(TestCase):
             parser.HELP: mock_help,
             **kwargs,
         }
-        output = self.parser.add_property_command(prop, "", **kwargs)
+        output = self.parser.add_property_command(prop, "", **kwargs)  # type: ignore[arg-type]
         self.assertEqual(mock_subparser, output)
         mock_get_first_doc_line.assert_called_once_with(get_prop)
         mock_add_parser.assert_called_once_with(**expected_kwargs)
@@ -160,7 +160,7 @@ class ControlParserTestCase(TestCase):
             parser.HELP: expected_help,
             **kwargs,
         }
-        output = self.parser.add_property_command(prop, "", **kwargs)
+        output = self.parser.add_property_command(prop, "", **kwargs)  # type: ignore[arg-type]
         self.assertEqual(mock_subparser, output)
         mock_get_first_doc_line.assert_has_calls(
             [call(get_prop), call(set_prop)]
@@ -409,7 +409,8 @@ class RestTestCase(TestCase):
 
     @patch.object(parser, "_get_arg_type_wrapper")
     def test__get_type_from_annotation(
-        self, mock__get_arg_type_wrapper: MagicMock
+        self,
+        mock__get_arg_type_wrapper: MagicMock,
     ) -> None:
         mock__get_arg_type_wrapper.return_value = expected_output = FOO + BAR
         dotted_path_ann = [AnyCoroutineFunc, EndCB, CancelCB]

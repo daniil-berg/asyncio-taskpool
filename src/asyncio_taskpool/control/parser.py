@@ -19,11 +19,11 @@ from ast import literal_eval
 from inspect import Parameter, getmembers, isfunction, signature
 from shutil import get_terminal_size
 from typing import (
-    IO,
     Any,
     Callable,
     Container,
     Dict,
+    IO,
     Iterable,
     NoReturn,
     Protocol,
@@ -33,11 +33,20 @@ from typing import (
     cast,
     overload,
 )
+from typing_extensions import Unpack  # noqa: TCH002
 
 from ..exceptions import HelpRequested, ParserError, SubParsersNotInitialized
-from ..internals.constants import CLIENT_INFO, CMD
+from ..internals.constants import CMD
 from ..internals.helpers import get_first_doc_line, resolve_dotted_path
-from ..internals.types import AnyCoroutineFunc, ArgsT, CancelCB, EndCB, KwArgsT
+from ..internals.types import (
+    AddSubCommandParserKwargs,
+    AnyCoroutineFunc,
+    ArgsT,
+    CancelCB,
+    CommandParserSpecialKwargs,
+    EndCB,
+    KwArgsT,
+)
 
 __all__ = ["ControlParser"]
 
@@ -54,7 +63,10 @@ NAME, PROG, HELP, DESCRIPTION = "name", "prog", "help", "description"
 
 
 class _CanAddControlParser(Protocol):
-    def add_parser(self, **kwargs: Any) -> ControlParser:
+    def add_parser(
+        self,
+        **kwargs: Unpack[AddSubCommandParserKwargs],
+    ) -> ControlParser:
         ...
 
 
@@ -158,7 +170,7 @@ class ControlParser(ArgumentParser):
         self,
         function: Callable[..., Any],
         omit_params: Container[str] = OMIT_PARAMS_DEFAULT,
-        **subparser_kwargs: Any,
+        **subparser_kwargs: Unpack[AddSubCommandParserKwargs],
     ) -> ControlParser:
         """
         Takes a function and adds a corresponding (sub-)command to the parser.
@@ -182,11 +194,11 @@ class ControlParser(ArgumentParser):
         """
         if self._commands is None:
             raise SubParsersNotInitialized
-        subparser_kwargs.setdefault(NAME, function.__name__.replace("_", "-"))
-        subparser_kwargs.setdefault(PROG, subparser_kwargs[NAME])
-        subparser_kwargs.setdefault(HELP, get_first_doc_line(function))
-        subparser_kwargs.setdefault(DESCRIPTION, subparser_kwargs[HELP])
-        subparser: ControlParser = self._commands.add_parser(**subparser_kwargs)
+        subparser_kwargs.setdefault("name", function.__name__.replace("_", "-"))
+        subparser_kwargs.setdefault("prog", subparser_kwargs["name"])
+        subparser_kwargs.setdefault("help", get_first_doc_line(function))
+        subparser_kwargs.setdefault("description", subparser_kwargs["help"])
+        subparser = self._commands.add_parser(**subparser_kwargs)
         subparser.add_function_args(function, omit_params)
         return subparser
 
@@ -194,7 +206,7 @@ class ControlParser(ArgumentParser):
         self,
         prop: property,
         cls_name: str = "",
-        **subparser_kwargs: Any,
+        **subparser_kwargs: Unpack[AddSubCommandParserKwargs],
     ) -> ControlParser:
         """
         Same as the :meth:`add_function_command` method, but for properties.
@@ -215,18 +227,20 @@ class ControlParser(ArgumentParser):
             raise TypeError("Property must have a getter")  # noqa: TRY003
         if self._commands is None:
             raise SubParsersNotInitialized
-        subparser_kwargs.setdefault(NAME, prop.fget.__name__.replace("_", "-"))
-        subparser_kwargs.setdefault(PROG, subparser_kwargs[NAME])
+        subparser_kwargs.setdefault(
+            "name", prop.fget.__name__.replace("_", "-")
+        )
+        subparser_kwargs.setdefault("prog", subparser_kwargs["name"])
         getter_help = get_first_doc_line(prop.fget)
         if prop.fset is None:
-            subparser_kwargs.setdefault(HELP, getter_help)
+            subparser_kwargs.setdefault("help", getter_help)
         else:
             subparser_kwargs.setdefault(
-                HELP,
-                f"Get/set the `{cls_name}.{subparser_kwargs[NAME]}` property",
+                "help",
+                f"Get/set the `{cls_name}.{subparser_kwargs['name']}` property",
             )
-        subparser_kwargs.setdefault(DESCRIPTION, subparser_kwargs[HELP])
-        subparser: ControlParser = self._commands.add_parser(**subparser_kwargs)
+        subparser_kwargs.setdefault("description", subparser_kwargs["help"])
+        subparser = self._commands.add_parser(**subparser_kwargs)
         if prop.fset is not None:
             _, param = signature(prop.fset).parameters.values()
             setter_arg_help = (
@@ -272,17 +286,15 @@ class ControlParser(ArgumentParser):
             Dictionary mapping member names to the subparsers created from them.
         """
         parsers: ParsersDict = {}
-        # TODO: Annotate the following as a TypedDict
-        # https://github.com/daniil-berg/asyncio-taskpool/issues/2
-        common_kwargs = {
-            "stream": self._stream,
-            CLIENT_INFO.TERMINAL_WIDTH: self._terminal_width,
-        }
+        common_kwargs = CommandParserSpecialKwargs(
+            stream=self._stream,
+            terminal_width=self._terminal_width,
+        )
         for name, member in getmembers(cls):
             if name in omit_members or (name.startswith("_") and public_only):
                 continue
             if isfunction(member):
-                subparser = self.add_function_command(member, **common_kwargs)  # type: ignore[arg-type]
+                subparser = self.add_function_command(member, **common_kwargs)
             elif isinstance(member, property):
                 subparser = self.add_property_command(
                     member, cls.__name__, **common_kwargs

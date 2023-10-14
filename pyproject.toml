@@ -186,4 +186,5 @@ line_length = 80
 [tool.isort]
 profile = "black"
 extra_standard_library = ["typing_extensions"]
+classes = ["IO"]
 line_length = 80
