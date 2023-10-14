@@ -27,9 +27,8 @@ class CLITestCase(IsolatedAsyncioTestCase):
         parsed_kwargs = module.parse_cli(args)
         self.assertDictEqual(expected_kwargs, parsed_kwargs)
 
-        with patch("sys.stderr"):
-            with self.assertRaises(SystemExit):
-                module.parse_cli(["invalid", "foo", "bar"])
+        with patch("sys.stderr"), self.assertRaises(SystemExit):
+            module.parse_cli(["invalid", "foo", "bar"])
 
     @patch.object(module, "parse_cli")
     async def test_main(self, mock_parse_cli: MagicMock) -> None:

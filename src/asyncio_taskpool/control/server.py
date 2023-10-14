@@ -4,18 +4,22 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from asyncio import AbstractServer
 from asyncio.exceptions import CancelledError
 from asyncio.streams import StreamReader, StreamWriter, start_server
 from asyncio.tasks import Task, create_task
 from pathlib import Path
-from typing import Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
+from ..exceptions import ServerNotInitialized
 from ..internals.helpers import classmethod
-from ..internals.types import ConnectedCallbackT, PathT
-from ..pool import AnyTaskPoolT
 from .client import ControlClient, TCPControlClient, UnixControlClient
 from .session import ControlSession
+
+if TYPE_CHECKING:
+    from asyncio import AbstractServer
+
+    from ..internals.types import ConnectedCallbackT, PathT
+    from ..pool import AnyTaskPoolT
 
 __all__ = ["ControlServer", "TCPControlServer", "UnixControlServer"]
 
@@ -120,7 +124,8 @@ class ControlServer(ABC, Generic[ClientT]):
         that ensures that the `_final_callback` method is called, when the
         former method ends for whatever reason.
         """
-        assert self._server is not None, "Server not instantiated yet"
+        if self._server is None:
+            raise ServerNotInitialized
         try:
             async with self._server:
                 await self._server.serve_forever()

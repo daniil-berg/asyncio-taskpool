@@ -208,7 +208,7 @@ class UnixControlServerTestCase(IsolatedAsyncioTestCase):
         self.base_init_patcher = patch.object(server.ControlServer, "__init__")
         self.mock_base_init = self.base_init_patcher.start()
         self.mock_pool = MagicMock()
-        self.path = "/tmp/asyncio_taskpool"
+        self.path = "/not/a/real/path"
         self.kwargs = {FOO: 123, BAR: 456}
         self.server = server.UnixControlServer(
             pool=self.mock_pool, socket_path=self.path, **self.kwargs

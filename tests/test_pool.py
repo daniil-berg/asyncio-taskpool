@@ -113,7 +113,7 @@ class BaseTaskPoolTestCase(CommonTestCase):
         self.assertTrue(self.task_pool.is_locked)
 
     def test_lock(self) -> None:
-        assert not self.task_pool._locked
+        self.assertFalse(self.task_pool._locked)
         self.task_pool.lock()
         self.assertTrue(self.task_pool._locked)
         self.task_pool.lock()
@@ -168,9 +168,9 @@ class BaseTaskPoolTestCase(CommonTestCase):
         self.task_pool._closed.set()
         mock_coroutine, mock_coroutine_function = AsyncMock()(), AsyncMock()
         try:
-            with self.assertRaises(AssertionError):
+            with self.assertRaises(TypeError):
                 self.task_pool._check_start(awaitable=None, function=None)
-            with self.assertRaises(AssertionError):
+            with self.assertRaises(TypeError):
                 self.task_pool._check_start(
                     awaitable=mock_coroutine, function=mock_coroutine_function
                 )
@@ -178,7 +178,7 @@ class BaseTaskPoolTestCase(CommonTestCase):
                 self.task_pool._check_start(
                     awaitable=mock_coroutine_function, function=None
                 )
-            with self.assertRaises(exceptions.NotCoroutine):
+            with self.assertRaises(exceptions.NotCoroutineFunction):
                 self.task_pool._check_start(
                     awaitable=None, function=mock_coroutine
                 )

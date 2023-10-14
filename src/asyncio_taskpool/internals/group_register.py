@@ -7,8 +7,10 @@ It should not be considered part of the public API.
 from __future__ import annotations
 
 from asyncio.locks import Lock
-from types import TracebackType
-from typing import Iterator, MutableSet, Set, Type, TypeVar
+from typing import TYPE_CHECKING, Iterator, MutableSet, Set, Type, TypeVar
+
+if TYPE_CHECKING:
+    from types import TracebackType
 
 _E = TypeVar("_E", bound=BaseException)
 

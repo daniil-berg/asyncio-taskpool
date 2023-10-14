@@ -57,7 +57,7 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         self, mock_return_or_exception: AsyncMock
     ) -> None:
         def method(
-            self: Any, arg1: Any, arg2: Any, *var_args: Any, **rest: Any
+            self: Any, arg1: Any, arg2: Any, *var_args: Any, **rest: Any  # noqa
         ) -> None:
             pass
 

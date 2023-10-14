@@ -8,10 +8,12 @@ import sys
 from abc import ABC, abstractmethod
 from asyncio.streams import StreamReader, StreamWriter, open_connection
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..internals.constants import CLIENT_INFO, SESSION_MSG_BYTES
-from ..internals.types import ClientConnT, PathT
+
+if TYPE_CHECKING:
+    from ..internals.types import ClientConnT, PathT
 
 __all__ = [
     "ControlClient",
@@ -220,3 +222,7 @@ class UnixControlClient(ControlClient):
         except FileNotFoundError:
             print("No socket at", self._socket_path, file=sys.stderr)
             return None, None
+
+
+# Using `print` in the reference client is fine.
+# ruff: noqa: T201

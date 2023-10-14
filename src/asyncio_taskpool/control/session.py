@@ -9,18 +9,24 @@ from __future__ import annotations
 import json
 import logging
 from argparse import ArgumentError
-from asyncio.streams import StreamReader, StreamWriter
 from inspect import isfunction, signature
 from io import StringIO
 from typing import TYPE_CHECKING, Any, Callable
 
-from ..exceptions import CommandError, HelpRequested, ParserError
+from ..exceptions import (
+    CommandError,
+    HelpRequested,
+    ParserError,
+    ParserNotInitialized,
+)
 from ..internals.constants import CLIENT_INFO, CMD, CMD_OK
 from ..internals.helpers import return_or_exception
-from ..pool import SimpleTaskPool, TaskPool
 from .parser import ControlParser
 
 if TYPE_CHECKING:
+    from asyncio.streams import StreamReader, StreamWriter
+
+    from ..pool import AnyTaskPoolT
     from .server import ClientT, ControlServer
 
 
@@ -64,7 +70,7 @@ class ControlSession:
                 `asyncio.StreamWriter` created when a client connected.
         """
         self._control_server: "ControlServer[ClientT]" = server
-        self._pool: TaskPool | SimpleTaskPool = server.pool
+        self._pool: AnyTaskPoolT = server.pool
         self._client_class_name = server.client_class_name
         self._reader: StreamReader = reader
         self._writer: StreamWriter = writer
@@ -138,7 +144,8 @@ class ControlSession:
                 stream will be its return value (as an encoded string).
         """
         if kwargs:
-            assert prop.fset is not None, "Property has not setter"
+            if prop.fset is None:
+                raise TypeError("Property must have a setter")  # noqa: TRY003
             log.debug(
                 "%s sets %s.%s",
                 self._client_class_name,
@@ -148,7 +155,8 @@ class ControlSession:
             await return_or_exception(prop.fset, self._pool, **kwargs)  # type: ignore[call-arg]
             self._response_buffer.write(CMD_OK.decode())
         else:
-            assert prop.fget is not None, "Property has not getter"
+            if prop.fget is None:
+                raise TypeError("Property must have a getter")  # noqa: TRY003
             log.debug(
                 "%s gets %s.%s",
                 self._client_class_name,
@@ -198,7 +206,8 @@ class ControlSession:
         Args:
             msg: The non-empty string read from the client stream.
         """
-        assert self._parser is not None, "Parser not initialized yet"
+        if self._parser is None:
+            raise ParserNotInitialized
         try:
             kwargs = vars(self._parser.parse_args(msg.split(" ")))
         except ArgumentError as e:

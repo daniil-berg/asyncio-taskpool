@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import sys
 from asyncio.queues import Queue as _Queue
-from types import TracebackType
 from typing import TYPE_CHECKING, Any, Type, TypeVar
+
+if TYPE_CHECKING:
+    from types import TracebackType
 
 __all__ = ["Queue"]
 

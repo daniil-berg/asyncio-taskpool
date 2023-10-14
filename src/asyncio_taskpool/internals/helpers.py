@@ -144,7 +144,7 @@ def star_function(
         return function(*arg)
     if arg_stars == 2:  # noqa: PLR2004
         return function(**arg)
-    raise ValueError(
+    raise ValueError(  # noqa: TRY003
         f"Invalid argument arg_stars={arg_stars}; must be 0, 1, or 2."
     )
 
@@ -182,8 +182,7 @@ async def return_or_exception(
             return await cast(
                 Awaitable[_R], _function_to_execute(*args, **kwargs)
             )
-        else:
-            return cast(_R, _function_to_execute(*args, **kwargs))
+        return cast(_R, _function_to_execute(*args, **kwargs))
     except Exception as e:
         return e
 
@@ -216,9 +215,8 @@ class _ClassMethodWorkaround:
         method_or_property: Callable[..., Any] | property,
     ) -> None:
         if isinstance(method_or_property, property):
-            assert (
-                method_or_property.fget is not None
-            ), "Missing property getter"
+            if method_or_property.fget is None:
+                raise TypeError("Property must have a getter")  # noqa: TRY003
             self._getter = method_or_property.fget
         else:
             self._getter = method_or_property

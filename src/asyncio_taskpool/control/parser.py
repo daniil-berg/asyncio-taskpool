@@ -17,7 +17,6 @@ from argparse import (
 )
 from ast import literal_eval
 from inspect import Parameter, getmembers, isfunction, signature
-from io import StringIO
 from shutil import get_terminal_size
 from typing import (
     IO,
@@ -35,7 +34,7 @@ from typing import (
     overload,
 )
 
-from ..exceptions import HelpRequested, ParserError
+from ..exceptions import HelpRequested, ParserError, SubParsersNotInitialized
 from ..internals.constants import CLIENT_INFO, CMD
 from ..internals.helpers import get_first_doc_line, resolve_dotted_path
 from ..internals.types import AnyCoroutineFunc, ArgsT, CancelCB, EndCB, KwArgsT
@@ -123,7 +122,7 @@ class ControlParser(ArgumentParser):
 
     def __init__(
         self,
-        stream: StringIO,
+        stream: IO[str],
         terminal_width: int | None = None,
         **kwargs: Any,
     ) -> None:
@@ -142,7 +141,7 @@ class ControlParser(ArgumentParser):
                 `formatter_class` parameter: Even if a class is specified, it
                 will always be subclassed in the :meth:`help_formatter_factory`.
         """
-        self._stream: StringIO = stream
+        self._stream: IO[str] = stream
         self._terminal_width: int = (
             terminal_width
             if terminal_width is not None
@@ -181,7 +180,8 @@ class ControlParser(ArgumentParser):
         Returns:
             The subparser instance created from the function.
         """
-        assert self._commands is not None, "Call `add_subparsers` first"
+        if self._commands is None:
+            raise SubParsersNotInitialized
         subparser_kwargs.setdefault(NAME, function.__name__.replace("_", "-"))
         subparser_kwargs.setdefault(PROG, subparser_kwargs[NAME])
         subparser_kwargs.setdefault(HELP, get_first_doc_line(function))
@@ -211,8 +211,10 @@ class ControlParser(ArgumentParser):
         Returns:
             The subparser instance created from the property.
         """
-        assert prop.fget is not None, "Property must have a getter"
-        assert self._commands is not None, "Call `add_subparsers` first"
+        if prop.fget is None:
+            raise TypeError("Property must have a getter")  # noqa: TRY003
+        if self._commands is None:
+            raise SubParsersNotInitialized
         subparser_kwargs.setdefault(NAME, prop.fget.__name__.replace("_", "-"))
         subparser_kwargs.setdefault(PROG, subparser_kwargs[NAME])
         getter_help = get_first_doc_line(prop.fget)
@@ -239,7 +241,7 @@ class ControlParser(ArgumentParser):
     def add_class_commands(
         self,
         cls: Type[Any],
-        public_only: bool = True,
+        public_only: bool = True,  # noqa: FBT001, FBT002
         omit_members: Container[str] = (),
         member_arg_name: str = CMD,
     ) -> ParsersDict:
@@ -271,6 +273,7 @@ class ControlParser(ArgumentParser):
         """
         parsers: ParsersDict = {}
         # TODO: Annotate the following as a TypedDict
+        # https://github.com/daniil-berg/asyncio-taskpool/issues/2
         common_kwargs = {
             "stream": self._stream,
             CLIENT_INFO.TERMINAL_WIDTH: self._terminal_width,
@@ -297,12 +300,12 @@ class ControlParser(ArgumentParser):
         )
         return self._commands
 
-    def _print_message(self, message: str, *args: Any, **kwargs: Any) -> None:
+    def _print_message(self, message: str, *_args: Any, **_kwargs: Any) -> None:
         """Overridden to ensure that messages are sent to the stream buffer."""
         if message:
             self._stream.write(message)
 
-    def exit(self, status: int = 0, message: str | None = None) -> None:  # type: ignore[override]
+    def exit(self, status: int = 0, message: str | None = None) -> None:  # type: ignore[override]  # noqa: ARG002
         """Overridden to prevent system exit to be invoked."""
         if message:
             self._print_message(message)
@@ -362,7 +365,7 @@ class ControlParser(ArgumentParser):
         if parameter.kind == Parameter.VAR_POSITIONAL:
             # To be able to unpack an arbitrary number of positional arguments.
             kwargs.setdefault("nargs", "*")
-        if not kwargs.get("action") == "store_true":
+        if kwargs.get("action") != "store_true":
             # Set the type from the parameter annotation.
             kwargs.setdefault(
                 "type", _get_type_from_annotation(parameter.annotation)
@@ -393,6 +396,7 @@ class ControlParser(ArgumentParser):
                 # TODO: Look into parsing docstrings properly to try and extract
                 #       argument help text. For now, the argument help just
                 #       shows the type it will be converted to.
+                # https://github.com/daniil-berg/asyncio-taskpool/issues/3
                 self.add_function_arg(param, help=repr(param.annotation))
 
 

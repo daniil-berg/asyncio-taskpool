@@ -23,6 +23,7 @@ from asyncio.tasks import Task, create_task, gather
 from contextlib import suppress
 from math import inf
 from typing import (
+    TYPE_CHECKING,
     Any,
     Awaitable,
     Callable,
@@ -44,23 +45,27 @@ from typing_extensions import ParamSpec, TypeVarTuple, Unpack
 from .exceptions import (
     AlreadyCancelled,
     AlreadyEnded,
-    InvalidGroupName,
-    InvalidTaskID,
     NotCoroutine,
+    NotCoroutineFunction,
     PoolIsClosed,
     PoolIsLocked,
+    TaskGroupAlreadyExists,
+    TaskGroupNotFound,
+    TaskNotFound,
 )
 from .internals.constants import DEFAULT_TASK_GROUP, PYTHON_BEFORE_39
 from .internals.group_register import TaskGroupRegister
 from .internals.helpers import execute_optional, star_function
-from .internals.types import (
-    AnyCoroutine,
-    AnyCoroutineFunc,
-    ArgsT,
-    CancelCB,
-    EndCB,
-    KwArgsT,
-)
+
+if TYPE_CHECKING:
+    from .internals.types import (
+        AnyCoroutine,
+        AnyCoroutineFunc,
+        ArgsT,
+        CancelCB,
+        EndCB,
+        KwArgsT,
+    )
 
 __all__ = ["BaseTaskPool", "TaskPool", "SimpleTaskPool", "AnyTaskPoolT"]
 
@@ -133,7 +138,7 @@ class BaseTaskPool:
             `ValueError`: `value` is less than 0.
         """
         if value < 0:
-            raise ValueError("Pool size can not be less than 0")
+            raise ValueError("Pool size can not be less than 0")  # noqa: TRY003
         self._enough_room._value = value
 
     @property
@@ -209,17 +214,15 @@ class BaseTaskPool:
             specified groups.
 
         Raises:
-            `InvalidGroupName`:
-                One of the specified`group_names` does not exist in the pool.
+            `TaskGroupNotFound`:
+                One of the specified `group_names` does not exist in the pool.
         """
         ids: Set[int] = set()
         for name in group_names:
             try:
                 ids.update(self._task_groups[name])
             except KeyError:
-                raise InvalidGroupName(
-                    f"No task group named {name} exists in this pool."
-                ) from None
+                raise TaskGroupNotFound(name) from None
         return ids
 
     def _check_start(
@@ -244,24 +247,29 @@ class BaseTaskPool:
                 If `True`, a locked pool will produce no error here.
 
         Raises:
-            `AssertionError`:
+            `TypeError`:
                 Both or neither of `awaitable` and `function` were passed.
             `asyncio_taskpool.exceptions.PoolIsClosed`:
                 The pool is closed.
             `asyncio_taskpool.exceptions.NotCoroutine`:
-                `awaitable` is not a cor. / `function` not a cor. func.
+                `awaitable` provided but not a coroutine
+            `asyncio_taskpool.exceptions.NotCoroutineFunction`:
+                `function` provided but not a coroutine function
             `asyncio_taskpool.exceptions.PoolIsLocked`:
                 The pool has been locked and `ignore_lock` is `False`.
         """
-        assert (awaitable is None) != (function is None)
+        if (awaitable is None) == (function is None):
+            raise TypeError(  # noqa: TRY003
+                "Either `awaitable` or `function` must be passed, but not both."
+            )
         if awaitable and not iscoroutine(awaitable):
-            raise NotCoroutine(f"Not awaitable: {awaitable}")
+            raise NotCoroutine(awaitable)
         if function and not iscoroutinefunction(function):
-            raise NotCoroutine(f"Not a coroutine function: {function}")
+            raise NotCoroutineFunction(function)
         if self._closed.is_set():
-            raise PoolIsClosed("You must use another pool")
+            raise PoolIsClosed
         if self._locked and not ignore_lock:
-            raise PoolIsLocked("Cannot start new tasks")
+            raise PoolIsLocked
 
     def _task_name(self, task_id: int) -> str:
         """Returns a standardized name for a task with a specific `task_id`."""
@@ -360,6 +368,7 @@ class BaseTaskPool:
         self,
         awaitable: Awaitable[Any],
         group_name: str = DEFAULT_TASK_GROUP,
+        *,
         ignore_lock: bool = False,
         end_callback: EndCB | None = None,
         cancel_callback: CancelCB | None = None,
@@ -396,6 +405,7 @@ class BaseTaskPool:
         # TODO: Make sure that cancellation (group or pool) interrupts
         #       this method after context switching!
         #       Possibly make use of the task group register for that.
+        # https://github.com/daniil-berg/asyncio-taskpool/issues/4
         group_reg = self._task_groups.setdefault(
             group_name, TaskGroupRegister()
         )
@@ -430,16 +440,10 @@ class BaseTaskPool:
             return self._tasks_running[task_id]
         except KeyError:
             if self._tasks_cancelled.get(task_id):
-                raise AlreadyCancelled(
-                    f"{self._task_name(task_id)} has been cancelled"
-                ) from None
+                raise AlreadyCancelled(self._task_name(task_id)) from None
             if self._tasks_ended.get(task_id):
-                raise AlreadyEnded(
-                    f"{self._task_name(task_id)} has finished running"
-                ) from None
-            raise InvalidTaskID(
-                f"No task with ID {task_id} found in {self}"
-            ) from None
+                raise AlreadyEnded(self._task_name(task_id)) from None
+            raise TaskNotFound(task_id, self) from None
 
     @staticmethod
     def _get_cancel_kw(msg: str | None) -> Dict[str, str]:
@@ -555,16 +559,14 @@ class BaseTaskPool:
                 Passed to the `Task.cancel()` method of every task in the group.
 
         Raises:
-            `InvalidGroupName`:
+            `TaskGroupNotFound`:
                 No task group named `group_name` exists in the pool.
         """
         log.debug("%s cancelling tasks in group %s", str(self), group_name)
         try:
             group_reg = self._task_groups.pop(group_name)
         except KeyError:
-            raise InvalidGroupName(
-                f"No task group named {group_name} exists in this pool."
-            ) from None
+            raise TaskGroupNotFound(group_name) from None
         kw = self._get_cancel_kw(msg)
         self._cancel_and_remove_all_from_group(group_name, group_reg, **kw)
         log.debug("%s forgot task group %s", str(self), group_name)
@@ -598,7 +600,7 @@ class BaseTaskPool:
         removed from the keys.
         """
         obsolete_keys, ended_meta_tasks = [], set()
-        for group_name in self._group_meta_tasks_running.keys():
+        for group_name in self._group_meta_tasks_running:
             still_running = set()
             while self._group_meta_tasks_running[group_name]:
                 meta_task = self._group_meta_tasks_running[group_name].pop()
@@ -616,7 +618,10 @@ class BaseTaskPool:
             del self._group_meta_tasks_running[group_name]
         return ended_meta_tasks
 
-    async def flush(self, return_exceptions: bool = False) -> None:
+    async def flush(
+        self,
+        return_exceptions: bool = False,  # noqa: FBT001, FBT002
+    ) -> None:
         """
         Gathers (i.e. awaits) all ended/cancelled tasks in the pool.
 
@@ -646,7 +651,10 @@ class BaseTaskPool:
         self._tasks_ended.clear()
         self._tasks_cancelled.clear()
 
-    async def gather_and_close(self, return_exceptions: bool = False) -> None:
+    async def gather_and_close(
+        self,
+        return_exceptions: bool = False,  # noqa: FBT001, FBT002,
+    ) -> None:
         """
         Gathers (i.e. awaits) **all** tasks in the pool, then closes it.
 
@@ -744,7 +752,7 @@ class TaskPool(BaseTaskPool):
         i = 0
         while True:
             name = f"{base_name}-{i}"
-            if name not in self._task_groups.keys():
+            if name not in self._task_groups:
                 return name
             i += 1
 
@@ -799,7 +807,9 @@ class TaskPool(BaseTaskPool):
                     repr(args),
                     repr(kwargs),
                 )
-                continue  # TODO: Consider returning instead of continuing
+                # TODO: Consider returning instead of continuing
+                # https://github.com/daniil-berg/asyncio-taskpool/issues/5
+                continue
             try:
                 await self._start_task(
                     coroutine,
@@ -877,16 +887,20 @@ class TaskPool(BaseTaskPool):
             Name of the newly created group (see the `group_name` parameter).
 
         Raises:
-            `PoolIsClosed`: The pool is closed.
-            `NotCoroutine`: `func` is not a coroutine function.
-            `PoolIsLocked`: The pool is currently locked.
-            `InvalidGroupName`: A group named `group_name` exists in the pool.
+            `PoolIsClosed`:
+                The pool is closed.
+            `NotCoroutineFunction`:
+                `func` is not a coroutine function.
+            `PoolIsLocked`:
+                The pool is currently locked.
+            `TaskGroupAlreadyExists`:
+                A group named `group_name` already exists in the pool.
         """
         self._check_start(function=func)
         if group_name is None:
             group_name = self._generate_group_name("apply", func)
-        if group_name in self._task_groups.keys():
-            raise InvalidGroupName(f"Group named {group_name} already exists!")
+        if group_name in self._task_groups:
+            raise TaskGroupAlreadyExists(group_name)
         self._task_groups.setdefault(group_name, TaskGroupRegister())
         meta_tasks = self._group_meta_tasks_running.setdefault(
             group_name, set()
@@ -1151,14 +1165,16 @@ class TaskPool(BaseTaskPool):
         Raises:
             `ValueError`:
                 `num_concurrent` is less than 1.
-            `asyncio_taskpool.exceptions.InvalidGroupName`:
+            `asyncio_taskpool.exceptions.TaskGroupAlreadyExists`:
                 A group named `group_name` exists in the pool.
         """
         self._check_start(function=func)
         if num_concurrent < 1:
-            raise ValueError("`num_concurrent` must be a positive integer.")
-        if group_name in self._task_groups.keys():
-            raise InvalidGroupName(f"Group named {group_name} already exists!")
+            raise ValueError(  # noqa: TRY003
+                "`num_concurrent` must be a positive integer."
+            )
+        if group_name in self._task_groups:
+            raise TaskGroupAlreadyExists(group_name)
         self._task_groups[group_name] = TaskGroupRegister()
         meta_tasks = self._group_meta_tasks_running.setdefault(
             group_name, set()
@@ -1241,11 +1257,16 @@ class TaskPool(BaseTaskPool):
             The name of the newly created group (see `group_name` parameter).
 
         Raises:
-            `PoolIsClosed`: The pool is closed.
-            `NotCoroutine`: `func` is not a coroutine function.
-            `PoolIsLocked`: The pool is currently locked.
-            `ValueError`: `num_concurrent` is less than 1.
-            `InvalidGroupName`: A group named `group_name` exists in the pool.
+            `PoolIsClosed`:
+                The pool is closed.
+            `NotCoroutineFunction`:
+                `func` is not a coroutine function.
+            `PoolIsLocked`:
+                The pool is currently locked.
+            `ValueError`:
+                `num_concurrent` is less than 1.
+            `TaskGroupAlreadyExists`:
+                A group named `group_name` already exists in the pool.
         """
         if group_name is None:
             group_name = self._generate_group_name("map", func)
@@ -1383,10 +1404,10 @@ class SimpleTaskPool(BaseTaskPool):
                 An optional name for the pool.
 
         Raises:
-            `NotCoroutine`: `func` is not a coroutine function.
+            `NotCoroutineFunction`: `func` is not a coroutine function.
         """
         if not iscoroutinefunction(func):
-            raise NotCoroutine(f"Not a coroutine function: {func}")
+            raise NotCoroutineFunction(func)
         self._func: AnyCoroutineFunc = func
         self._args: ArgsT = args
         self._kwargs: KwArgsT = kwargs if kwargs is not None else {}
@@ -1416,7 +1437,9 @@ class SimpleTaskPool(BaseTaskPool):
                     repr(self._args),
                     repr(self._kwargs),
                 )
-                continue  # TODO: Consider returning instead of continuing
+                # TODO: Consider returning instead of continuing
+                # https://github.com/daniil-berg/asyncio-taskpool/issues/5
+                continue
             try:
                 await self._start_task(
                     coroutine,

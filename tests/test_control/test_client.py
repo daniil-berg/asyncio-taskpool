@@ -239,7 +239,7 @@ class UnixControlClientTestCase(IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.base_init_patcher = patch.object(client.ControlClient, "__init__")
         self.mock_base_init = self.base_init_patcher.start()
-        self.path = "/tmp/asyncio_taskpool"
+        self.path = "/not/a/real/path"
         self.kwargs = {FOO: 123, BAR: 456}
         self.client = client.UnixControlClient(
             socket_path=self.path, **self.kwargs
