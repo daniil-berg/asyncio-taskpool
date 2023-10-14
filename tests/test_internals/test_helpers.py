@@ -140,6 +140,8 @@ class ClassMethodWorkaroundTestCase(TestCase):
         prop = property(getter)
         instance = helpers._ClassMethodWorkaround(func)
         self.assertIs(func, instance._getter)
+        with self.assertRaises(TypeError):
+            helpers._ClassMethodWorkaround(property())
         instance = helpers._ClassMethodWorkaround(prop)
         self.assertIs(getter, instance._getter)
 

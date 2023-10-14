@@ -15,6 +15,7 @@ from asyncio_taskpool.control.client import (
     TCPControlClient,
     UnixControlClient,
 )
+from asyncio_taskpool.exceptions import ServerNotInitialized
 
 FOO, BAR = "foo", "bar"
 EMPTY_SET: Set[Any] = set()
@@ -95,6 +96,8 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
     async def test__serve_forever(
         self, mock__final_callback: MagicMock
     ) -> None:
+        with self.assertRaises(ServerNotInitialized):
+            await self.server._serve_forever()
         mock_aenter, mock_serve_forever = AsyncMock(), AsyncMock(
             side_effect=asyncio.CancelledError
         )

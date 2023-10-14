@@ -15,7 +15,11 @@ from unittest import TestCase
 from unittest.mock import MagicMock, call, patch
 
 from asyncio_taskpool.control import parser
-from asyncio_taskpool.exceptions import HelpRequested, ParserError
+from asyncio_taskpool.exceptions import (
+    HelpRequested,
+    ParserError,
+    SubParsersNotInitialized,
+)
 from asyncio_taskpool.internals.constants import CLIENT_INFO
 from asyncio_taskpool.internals.helpers import resolve_dotted_path
 from asyncio_taskpool.internals.types import (
@@ -88,6 +92,8 @@ class ControlParserTestCase(TestCase):
         def foo_bar() -> None:
             pass
 
+        with self.assertRaises(SubParsersNotInitialized):
+            self.parser.add_function_command(foo_bar)
         mock_subparser = MagicMock()
         mock_add_parser = MagicMock(return_value=mock_subparser)
         self.parser._commands = MagicMock(add_parser=mock_add_parser)
@@ -120,7 +126,11 @@ class ControlParserTestCase(TestCase):
         def set_prop(_self: Any, _value: Any) -> None:
             pass
 
+        with self.assertRaises(TypeError):
+            self.parser.add_property_command(property(fset=set_prop))
         prop = property(get_prop)
+        with self.assertRaises(SubParsersNotInitialized):
+            self.parser.add_property_command(prop)
         mock_subparser = MagicMock()
         mock_add_parser = MagicMock(return_value=mock_subparser)
         self.parser._commands = MagicMock(add_parser=mock_add_parser)

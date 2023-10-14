@@ -10,7 +10,7 @@ from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 from asyncio_taskpool.control import session
-from asyncio_taskpool.exceptions import HelpRequested
+from asyncio_taskpool.exceptions import HelpRequested, ParserNotInitialized
 from asyncio_taskpool.internals.constants import CLIENT_INFO, CMD, CMD_OK
 from asyncio_taskpool.pool import SimpleTaskPool
 
@@ -98,6 +98,11 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         def prop_set(_: Any, __: Any) -> None:
             pass
 
+        with self.assertRaises(TypeError):
+            await self.session._exec_property_and_respond(property(), foo=1)
+        with self.assertRaises(TypeError):
+            await self.session._exec_property_and_respond(property())
+
         prop = property(prop_get, prop_set)
         kwargs = {"value": "something"}
         mock_return_or_exception.return_value = None
@@ -169,6 +174,9 @@ class ControlServerTestCase(IsolatedAsyncioTestCase):
         mock__exec_method_and_respond: AsyncMock,
         mock__exec_property_and_respond: AsyncMock,
     ) -> None:
+        with self.assertRaises(ParserNotInitialized):
+            await self.session._parse_command("...")
+
         def method(_: Any) -> None:
             pass
 
