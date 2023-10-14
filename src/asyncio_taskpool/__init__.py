@@ -14,7 +14,7 @@ See the GNU Lesser General Public License for more details.
 You should have received a copy of the GNU Lesser General Public License along with asyncio-taskpool.
 If not, see <https://www.gnu.org/licenses/>."""
 
-__version__ = "1.1.4"
+__version__ = "1.2.0"
 
 __doc__ = """
 Top-level convenience imports.
